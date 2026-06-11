@@ -28,7 +28,9 @@ esac
 command -v ruff >/dev/null 2>&1 || exit 0
 [ -f "$file" ] || exit 0
 
-out="$(ruff check "$file" 2>&1)"
+# --no-cache: 훅의 CWD가 쓰기 불가(예: Windows의 Program Files)여도 ruff가
+# .ruff_cache 생성 실패로 config/internal 에러를 내지 않게 한다(단일 파일 lint엔 캐시 불필요).
+out="$(ruff check --no-cache "$file" 2>&1)"
 rc=$?
 [ $rc -eq 0 ] && exit 0   # 위반 없음
 

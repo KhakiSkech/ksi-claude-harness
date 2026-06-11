@@ -1,0 +1,44 @@
+# 전역 지침 (최소 · ultracode 중심) — 팀 템플릿
+
+> **이건 템플릿이다.** `~/.claude/CLAUDE.md`(개인 전역) 또는 각 프로젝트 `CLAUDE.md`에 복사해 쓴다.
+> 플러그인은 전역 CLAUDE.md를 자동으로 심을 수 없으므로(설계상), 이 파일을 직접 둔다.
+> 스택 섹션은 팀에 맞게 조정한다. 도구(스킬·에이전트·훅)는 `ksi-harness` 플러그인이 제공한다.
+> 로컬(Ollama) / 클라우드(Claude) 동일 적용.
+
+## 언어 (최우선)
+- 항상 **한국어**로 답한다(팀 기본값 — 영어 팀이면 이 절을 영어로 바꾼다).
+- 기술 용어는 영어 원어 유지(endpoint, race condition, state machine …). 어색한 직역 금지.
+- 코드·주석·커밋은 해당 repo의 기존 관습을 따른다.
+
+## 운영 모드 — ultracode 우선
+- ultracode는 **세션 전용**이다. 영구화하려면 `~/.bashrc`에 alias를 추가해야 하며, 이 alias(`--dangerously-skip-permissions` 포함)는 **하네스가 에이전트의 자동 추가를 차단하므로 사용자가 직접** 넣는다(README의 alias 참조). 미설정 시 세션마다 `/effort ultracode`로 켠다. (**ultracode = xhigh effort + workflow 자동화.** ultracode 세션에선 `effortLevel`이 effort를 결정하지 않음 — settings의 `effortLevel`(권장 `"high"`)은 `\claude` 비-ultracode fallback 기준값이다.)
+- **substantive task는 multi-agent workflow를 기본으로** author·run 한다. 사소한 일은 직접. **분기 예시:** 단일 파일 1~2개 수정·grep/조회·10분 내 = solo; 파일 3개+ 병렬·전체 감사·adversarial verify 필요 = fan-out. **규모는 작업 크기에 비례해 dial**(비제약이 기본이니 의도적으로 줄인다). 재사용 골격: `codebase-audit`(백엔드/일반)·`ui-audit`(프론트) 스킬.
+- **모델 배치 — 적재적소(fit-by-default), main-agnostic:** 메인=세션 최상위 모델(권장 **Fable**, **Opus** 메인이어도 그대로 동작 — 메인 하드코딩 금지). 비용 절약은 downgrade가 아니라 **적재적소의 부산물** — 잘못된 tier의 재작업·반복이 가장 비싼 토큰이다. 배치 기준:
+  - **메인급(fable)**: 틀리면 되돌리기 비싼 판단 · long-horizon 자율 실행 · 오케스트레이션(분해·종합·최종 판정). **메인 전용이 아니다 — 워커로도 투입.** 트리거: ① opus verify끼리 모순일 때 최종 tiebreak ② 아키텍처급 설계 분석 단위 ③ 고위험 변경(마이그레이션·배포·자금 경로)의 최종 verify. 메인급 워커는 model 미지정(=메인 inherit, **의도적으로만**). '크다'는 이유의 메인급 fan-out 금지 — 기준은 '어렵다·비싸게 틀린다'.
+  - **opus**: 명세를 만들거나 의심하는 일 — 설계 판단·코드리뷰·미묘한 버그·adversarial verify(일상 종점)·cross-module 추론. 틀려도 재작업으로 복구 가능한 판단까지가 opus, 그 너머가 메인급.
+  - **sonnet**: 명세를 따르는 일 — 구현·리팩터·테스트·정형 분석(대량 구현=worker). **코드 생성·수정 신뢰 하한 = sonnet high** — 공식 권장(medium)보다 한 단계 보수적인 하우스룰.
+  - **haiku**: 탐색·검색·라이브러리 조사·분류·요약·비코드 잡일(read-only=빌트인 Explore · 경량 쓰기=scout). **코드 파일 수정 금지.** effort 노브 없음.
+  미지정 agent()는 메인을 inherit → 메인급 슬롯 외엔 **항상 alias(`'fable'`/`'opus'`/`'sonnet'`/`'haiku'`)로 명시**(풀 모델 ID 금지). 레버: workflow `agent({model})` · Agent per-spawn `model` · 서브에이전트 `model:`+`effort:`. **티어 선택은 기억이 아니라 스킬/워크플로에 baked-in**(codebase-audit·ui-audit이 예시). 에스컬레이션: 워커가 실패하거나·**adversarial verify가 워커 결과를 깨뜨리거나**·확신 부족이면 한 단계 승급 재시도(haiku→sonnet→opus→메인) — 승급 트리거는 워커 *자기신고*에만 의존하지 말 것(값싼 워커는 그럴듯한 거짓을 낸다). **단계당 1회·2단계 연속 승급 금지, 재실패면 메인이 직접 진단.** 필요한 tier를 아끼려 내리는 것도, 막연히 올리는 것도 결함.
+- **effort 배치 — xhigh에서 임의로 꺾지 않는다:** low=기계적·명시적 잡일 · medium=루틴·요약·간단 추론 · high=표준 출발점(전 surface 디폴트, Fable 5도 high 출발) · xhigh=어려운 코딩·에이전틱(Opus 4.7+ 권장, ultracode 세션 자동) · **max=틀리면 안 되는 단발 최종 판단**(상시용 아님 — overthinking 경향). 가용성: xhigh·max=Fable·Opus 4.7+(Sonnet은 max까지·xhigh 없음) · Haiku=effort 없음. **메인은 effort를 스스로 못 올린다 — 아키텍처 결정·되돌리기 어려운 최종 검증을 만나면 "`/effort max` 권장"을 사용자에게 한 줄 제안.** 코드 작업의 effort 하한은 worker의 high. 불필요한 에이전트 증식 금지.
+- read-heavy 작업은 서브에이전트로 격리해 메인 context를 깨끗이 유지하고, 중요한 발견은 adversarial하게 검증한다.
+
+## 자율성 — 균형형
+- 기본은 끝까지 자율 실행("모두/자동/알아서 진행" = 멈추지 말고 완결).
+- **단 두 경우만 먼저 한 줄로 확인:** ① 되돌리기 어려운 작업(대량삭제·git push·배포·DB 마이그레이션·비밀변경·외부전송) ② 의도가 모호한 고위험 스코프(추측 말고 이해한 바 요약 확인). → `deep-interview` 스킬.
+
+## 작업 방식
+- 큰 변경은 **plan 먼저**. (Phase 분해는 필요할 때만 — 강제 아님)
+- 아키텍처 문서(`docs/`)가 있으면 SSOT로 우선, 충돌 시 문서를 따른다.
+- **코딩 품질은 기본기다** — 주변 코드에 맞춰 잘 짠다. 특정 메트릭(응집도·결합도 등)을 강제하지 않는다.
+- "완료" 선언 전 검증을 **실제로 실행**: Python=ruff/mypy/pytest, TS=typecheck/test. 실패·skip은 정직하게 보고. (.py 저장 시 ruff는 플러그인 훅이 자동 점검 — standalone `ruff`/`mypy` 바이너리는 `ruff .`/`mypy .`, pytest만 `python3 -m pytest`.)
+- **"green ≠ 작동" — 픽스처가 실제 흐름을 우회하면 검증이 아니다.** 시드·테스트가 파생/종단 상태를 손으로 주입(`status=finalized`, 점수 직접 적재)하면 가짜 초록불이다. 핵심 사용자 여정은 **실제 상태 전이(생성→…→최종화→산출물)를 적어도 한 번 통과**시켜 확인한다. (워크플로 self-report "완료/0"도 신뢰 말고 **최종 캐시클린 재검증** — incremental 캐시가 중간 상태로 거짓 신호를 낼 수 있다.)
+- **UI 변경은 "타입·테스트 통과"로 끝나지 않는다 — 렌더를 눈으로 본다.** `.tsx/.jsx/.css` 등 화면 변경 시 앱을 띄워 desktop + mobile(390px) 스크린샷을 Read로 확인하고 깨짐(오버플로·한글 텍스트 세로쪼개짐·빈/희박 상태·터치타겟<44px)을 점검. **e2e 통과 ≠ 시각적으로 멀쩡함.** 전 페이지 점검은 `ui-audit` 스킬. (플러그인의 Stop 훅이 미커밋 화면 편집 시 시각검증을 넛지한다 — fan-out 서브에이전트 편집도 포함.)
+- **한글 UI 기본값:** 텍스트 컨테이너는 `word-break: keep-all`을 기본으로, 표·카드는 모바일에서 가로스크롤이 아니라 세로 reflow를 설계 단계에서 계획. 빈·희박·아주 긴 이름 데이터로 본다.
+
+## 스택 기본값 (팀에 맞게 조정)
+Python(FastAPI/Pydantic/pytest/ruff/mypy) · Next.js+TS · Docker · Supabase · AI는 Gemma/Ollama. 외부 도구는 무료 tier 우선.
+
+## 제공 도구 (ksi-harness 플러그인)
+- 스킬: `deep-interview`(착수 전 의도 확정) · `brainstorm`(발산→수렴) · `ui-audit`(UI 시각 검증) · `codebase-audit`(백엔드/일반 코드 병렬 감사→adversarial 검증→종합). 플러그인 설치 시 `/ksi-harness:<skill>`로 호출(또는 그냥 스킬명으로).
+- 서브에이전트는 **tier 전용 워커만** — `worker`(Sonnet high, 위임 코드 구현)·`scout`(Haiku, 경량 쓰기 잡일 — **코드 파일 수정 금지**). 도메인 페르소나는 두지 않는다(전문성은 프롬프트/맥락에). 그 외는 빌트인(Explore=Haiku 탐색·Plan·general-purpose·code-review) + workflow inline agent.
+- 검증 게이트 훅(플러그인): `.py` 저장 시 ruff lint(advisory) · 화면 파일 미커밋 편집 시 UI 시각검증 넛지(Stop).

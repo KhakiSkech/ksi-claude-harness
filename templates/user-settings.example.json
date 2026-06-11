@@ -1,0 +1,9 @@
+{
+  "_comment": "권장 사용자 설정 — ~/.claude/settings.json 에 병합(필요한 키만 복사, _comment 는 지운다). 플러그인은 effort·permission·hooks 를 강제할 수 없으므로 이 값들은 사용자가 직접 넣는다. hooks 는 플러그인(ksi-harness)이 제공하므로 여기 넣지 않는다.",
+  "_model_note": "model 키는 의도적으로 없음 = main-agnostic. 메인 모델은 settings 에 핀하지 말고 세션에서 /model 로 고른다(권장 Fable, Opus 도 무손상).",
+  "effortLevel": "high",
+  "theme": "dark",
+  "skipDangerousModePermissionPrompt": true,
+  "skipAutoPermissionPrompt": true,
+  "agentPushNotifEnabled": true
+}

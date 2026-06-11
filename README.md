@@ -25,11 +25,11 @@ ultracode-first **멀티에이전트 워크플로 하네스**를 팀에 배포�
 
 ### 1. 플러그인 — 둘 중 하나
 
-**(a) 프로젝트 단위 자동활성화 (팀 공유, 권장)** — 프로젝트의 `.claude/settings.json`에 `templates/project-settings.example.json` 내용을 병합하고 git 체크인. `YOUR-ORG/ksi-claude-harness`를 실제 repo로 바꾼다. 팀원이 프로젝트를 신뢰(trust)하면 자동 등록·활성화된다.
+**(a) 프로젝트 단위 자동활성화 (팀 공유, 권장)** — 프로젝트의 `.claude/settings.json`에 `templates/project-settings.example.json` 내용을 병합하고 git 체크인(repo 좌표는 `KhakiSkech/ksi-claude-harness`로 설정돼 있음). 팀원이 프로젝트를 신뢰(trust)하면 자동 등록·활성화된다. private repo라 팀원은 GitHub 접근 권한(collaborator)이 필요하다.
 
 **(b) 개인 설치**
 ```
-/plugin marketplace add YOUR-ORG/ksi-claude-harness
+/plugin marketplace add KhakiSkech/ksi-claude-harness
 /plugin install ksi-harness@ksi-tools
 ```
 (로컬 테스트는 `/plugin marketplace add ./ksi-claude-harness`)

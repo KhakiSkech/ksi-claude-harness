@@ -1,11 +1,11 @@
 {
   "//": "팀 자동활성화용 예시 — 프로젝트의 .claude/settings.json 에 병합한다(git 체크인 → 팀 공유).",
-  "//repo": "아래 YOUR-ORG/ksi-claude-harness 를 실제 마켓플레이스 repo로 바꾼다.",
+  "//repo": "마켓플레이스 repo 좌표. fork해서 쓰면 본인 repo로 바꾼다.",
   "extraKnownMarketplaces": {
     "ksi-tools": {
       "source": {
         "source": "github",
-        "repo": "YOUR-ORG/ksi-claude-harness"
+        "repo": "KhakiSkech/ksi-claude-harness"
       }
     }
   },

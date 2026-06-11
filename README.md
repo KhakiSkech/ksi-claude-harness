@@ -78,6 +78,15 @@ alias claude='claude --dangerously-skip-permissions --settings '\''{"ultracode":
 - 활발한 개발: `plugin.json`/`marketplace.json`의 `version`을 생략하면 git commit SHA가 버전이 된다.
 - 안정 배포: semantic versioning(`0.1.0` → bump). 마켓플레이스 `source`에 `ref`(tag/branch)로 stable/latest 채널 분리 가능.
 
+## 멀티머신 동기화 (한 줄)
+다른 머신에서 새 버전이 push되면, repo clone에서 한 줄로 받는다 — repo 최신화 + 플러그인 갱신 + 훅 회귀까지:
+```
+bash scripts/sync-machine.sh        # 모드 자동 감지 (Windows는 git-bash에서)
+```
+- **플러그인 머신**(예: Windows): `marketplace update` + `plugin update`(적용은 Claude Code 재시작 후) + dist 훅 회귀 — 이 머신 bash/python3 이식성까지 한 번에 검증.
+- **native 머신**(`~/.claude` 직접 운용): pull로 들어온 plugin/template 변경의 **패리티 확인 목록**을 출력하고(자동 복사는 안 함 — 로컬 스킬은 도메인 예시 유지가 정상), **로컬 `~/.claude/hooks`를 실측**으로 회귀.
+- 강제 지정: `--plugin` / `--native`.
+
 ## 훅 행동 회귀 테스트
 훅을 수정했거나 새 머신(Windows git-bash 포함)에 깔았으면 한 번 돌린다 — 합성 repo+transcript로 3개 훅의 발화/침묵 12케이스를 검사(ruff 미설치 머신은 ruff 2케이스 SKIP → 10케이스):
 ```

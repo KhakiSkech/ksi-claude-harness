@@ -28,7 +28,7 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 `scout`(쓰기 필요 시) 또는 빌트인 **Explore**(read-only, 이미 Haiku)로 각 단위의 파일 인벤토리·grep 인덱싱·진입점을 빠르고 싸게 수집.
 
 ## 3. 분석 fan-out — Sonnet tier
-단위별 워커가 병렬 분석. **diverse-lens**로: 정확성/버그 · 보안 · 성능 · 일관성/중복 · 설정-의도 정합 · 문서-코드 drift · **핵심 여정 실행성**(시드/테스트/픽스처가 파생·종단 상태를 직접 세팅해 실제 flow를 우회하는 '가짜 green' smell — `status=finalized` 주입, 점수 직접 적재 등. 데모는 차 있는데 실사용 동선은 막혀 있나) · **제품 정체성 SSOT 정합**(README·CLAUDE.md 도메인 불변식/제품명과 모순되는 표면이 있나 — 피벗·리네이밍 후 구 브랜드·구 렌더러·구 분류 잔재가 누수돼 신·구 제품이 한 화면에 공존하나).
+단위별 워커가 병렬 분석. **diverse-lens**로: 정확성/버그 · 보안 · 성능 · 일관성/중복 · 설정-의도 정합 · 문서-코드 drift · **핵심 여정 실행성**(시드/테스트/픽스처가 파생·종단 상태를 직접 세팅해 실제 flow를 우회하는 '가짜 green' smell — 완료 플래그 직접 세팅, 집계/파생값 직접 적재 등. 데모는 차 있는데 실사용 동선은 막혀 있나) · **제품 정체성 SSOT 정합**(README·CLAUDE.md 도메인 불변식/제품명과 모순되는 표면이 있나 — 리네이밍·피벗 후 구 명칭·구 컴포넌트·구 분류 잔재가 누수돼 신·구가 한 화면에 공존하나).
 - workflow: `agent(prompt, {model: 'sonnet', schema})`
 - 인터랙티브: Task로 `subagent_type: worker` spawn (worker.md가 Sonnet+effort 고정)
 - 어려운 추론이 필요한 단위만 `'opus'`로.
@@ -36,7 +36,7 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 ## 4. adversarial 검증 — opus tier (생략 금지)
 각 high/medium finding을 **다른 에이전트가 반증 시도** — 실제 파일/근거를 다시 열어 거짓양성·과장·지어낸 명령/경로를 거른다. 살아남은 것만 채택. 확실치 않으면 보수적으로 의심.
 - workflow: `agent(\`반증하라: ${finding}\`, {model: 'opus', schema: VERDICT})`
-- **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·자금 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐.
+- **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·비가역 데이터 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐.
 
 ## 5. 완성도 critic → verify 재투입 (수렴 루프, opus tier)
 별도 렌즈로 "빠진 게 뭔가 — 안 본 모듈·미검증 주장·미확인 가정·안 돌린 렌즈"를 재점검.

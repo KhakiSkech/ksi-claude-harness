@@ -36,12 +36,12 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 
 ## 4. adversarial 검증 — opus tier (생략 금지)
 각 critical/high finding(기본 — dial로 medium 이하 확장)을 **다른 에이전트가 반증 시도** — 실제 파일/근거를 다시 열어 거짓양성·과장·지어낸 명령/경로를 거른다. 살아남은 것만 채택. 확실치 않으면 보수적으로 의심. (§0.5 verify 트리거와 동일 기준 — 절마다 다르게 읽히면 안 된다.)
-- workflow: `agent(\`반증하라: ${finding}\`, {model: 'opus', schema: VERDICT})`
+- 검증 tier = **`reviewer`**(Opus xhigh, read-only — Edit/Write 없어 "검증하다 슬쩍 고치기" 구조적 차단). workflow: `agent(\`반증하라: ${finding}\`, {agentType: 'reviewer', schema: VERDICT})` (`{model:'opus'}`도 동작하나 reviewer면 effort·read-only가 frontmatter로 고정). 인터랙티브: Task로 `subagent_type: reviewer` spawn.
 - **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·비가역 데이터 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐.
 - **1M 컨텍스트는 비용이 아니라 용량 결정**(opus/메인 1M 세션이면 자동 부착, 가격 프리미엄 없음): 단일 finding verify엔 과프로비저닝이나 무해, **cross-finding critic·전모듈 종합**처럼 많은 근거를 동시에 들어야 하는 단계엔 정당.
 
 ## 5. 완성도 critic → verify 재투입 (수렴 루프, opus tier)
-별도 렌즈로 "빠진 게 뭔가 — 안 본 모듈·미검증 주장·미확인 가정·안 돌린 렌즈"를 재점검.
+별도 렌즈로 "빠진 게 뭔가 — 안 본 모듈·미검증 주장·미확인 가정·안 돌린 렌즈"를 재점검. critic·verify 모두 **`reviewer` tier**(§4) — 둘은 같은 opus read-only 검증 에이전트의 두 모드(반증 vs 완성도)일 뿐 별도 에이전트가 아니다.
 - **critic 산출물을 그냥 채택하지 않는다** — critic이 낸 새 finding도 §4 adversarial verify를 한 번 더 통과시켜 살아남은 것만 채택(값싼 critic도 그럴듯한 거짓을 낸다 — verify 우회 금지). 1차 findings는 verify로 걸렀는데 critic 추가분만 무검증 통과하는 게 흔한 누락이다.
 - critic이 '안 본 단위'를 반환하고 round < 상한(2)이면 그 단위를 **다음 라운드의 분석 fan-out으로 재투입**. critic 무소득이거나 상한 도달이면 정지. (pipeline은 고정 깊이 단발이므로, 이 재투입이 없으면 critic은 루프가 아니라 terminal one-shot이 된다.)
 
@@ -49,6 +49,6 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 severity로 정렬한 findings + 구체 권고. 반복 결함은 단위별 땜질이 아니라 **구조적 처방**(공유 모듈/규칙/SSOT).
 
 ## 원칙
-- **티어링:** 탐색=Explore/scout(`'haiku'`) · 분석·구현=worker(`'sonnet'`) · verify·어려운 추론=`'opus'` 워커 · 모순 tiebreak/고위험 최종=메인급(미지정 inherit, 의도적으로만) · 판정·종합=메인(Fable이든 Opus든 무관). 모델은 alias로 지정 — 풀 ID 하드코딩 금지.
+- **티어링(3-tier 워커 + 메인급):** 탐색=Explore/scout(`'haiku'`) · 분석·구현=worker(`'sonnet'`) · verify·완성도 critic=**reviewer**(`'opus'`·xhigh·read-only) · 모순 tiebreak/고위험 최종=메인급(미지정 inherit, 의도적으로만) · 판정·종합=메인(Fable이든 Opus든 무관). 모델은 alias로 지정 — 풀 ID 하드코딩 금지.
 - **adversarial 필수:** 검증 안 거친 발견은 채택하지 않는다.
 - **dial:** exhaustiveness는 "항상 최대"가 아니라 작업 크기에 비례해.

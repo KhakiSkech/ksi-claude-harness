@@ -7,7 +7,10 @@ export const meta = {
 // ---- args (dial) ----
 // units: [{key, prompt}]  필수 — 단위별 분석 지시(출력 지시는 불필요, 스키마가 강제).
 // context: 모든 에이전트 프롬프트 앞에 붙는 공통 맥락(제품·페르소나·경로·design-side spec). 강력 권장.
-// analyzeModel='sonnet' | verifyModel='opus' | criticModel='opus'  (alias만 — 풀 ID 금지)
+// analyzeModel='sonnet'  (alias만 — 풀 ID 금지)
+// reviewerAgent='reviewer' (기본) — verify·critic을 reviewer 서브에이전트(opus·xhigh·read-only)로 라우팅: frontmatter가
+//   effort·read-only를 고정해 비-ultracode 세션에서도 xhigh로 검증. false면 model 기반(verifyModel/criticModel)으로 폴백.
+// verifyModel='opus' | criticModel='opus' — reviewerAgent=false일 때만 쓰는 폴백 모델.
 // maxRounds — critic 재투입 포함 상한: 기본 2, 천장 4(스킬 문서의 '상한 2'는 기본값 서술). verifySeverities=['critical','high'] — verify 트리거(dial).
 // critic=true — false면 critic 생략(작은 감사).
 // args가 JSON-encoded 문자열로 도착하는 호출 경로 방어
@@ -24,6 +27,14 @@ const criticModel = A.criticModel || 'opus'
 const maxRounds = Math.max(1, Math.min(4, A.maxRounds || 2))
 const verifySev = Array.isArray(A.verifySeverities) ? A.verifySeverities : ['critical', 'high']
 const useCritic = A.critic !== false
+// verify/critic = reviewer tier(opus·xhigh·read-only). reviewerAgent=false면 처음부터 model 기반.
+const reviewerAgent = A.reviewerAgent === undefined ? 'reviewer' : A.reviewerAgent
+// reviewer로 실행하되 미설치·미해석(agentType 미등록)이면 model 기반 opus로 폴백 —
+// verify가 silent no-op(미검증 finding을 그냥 confirmed)으로 무너지지 않게(가짜 green 방지).
+const reviewAgent = (prompt, label, phase, schema, fallbackModel) =>
+  reviewerAgent
+    ? agent(prompt, { label, phase, schema, agentType: reviewerAgent }).catch(() => agent(prompt, { label, phase, schema, model: fallbackModel }))
+    : agent(prompt, { label, phase, schema, model: fallbackModel })
 
 const FINDINGS = {
   type: 'object',
@@ -91,7 +102,7 @@ const confirmed = []
 const refuted = []
 
 const verifyOne = (f, round) =>
-  agent(
+  reviewAgent(
     `${CTX}
 ## adversarial 검증 — 반증을 시도하라
 아래 finding이 실재하는지 회의적으로 재검증한다. 인용된 파일/근거를 직접 다시 열어 확인하고 환각·과장·심각도 오류를 잡는다.
@@ -102,7 +113,10 @@ const verifyOne = (f, round) =>
 위치: ${f.where}
 증거(주장): ${f.evidence}
 영향(주장): ${f.impact}`,
-    { label: `verify:${String(f.title).slice(0, 24)}`, phase: `Round ${round}`, schema: VERDICT, model: verifyModel },
+    `verify:${String(f.title).slice(0, 24)}`,
+    `Round ${round}`,
+    VERDICT,
+    verifyModel,
   )
     .then((v) => ({ ...f, verdict: v }))
     .catch(() => ({ ...f, verdict: null }))
@@ -141,14 +155,17 @@ while (pending.length && round < maxRounds) {
 
   pending = []
   if (useCritic) {
-    const cr = await agent(
+    const cr = await reviewAgent(
       `${CTX}
 ## 완성도 critic — 빠진 게 뭔가
 지금까지 분석한 단위: ${coveredUnits.join(', ')}
 확정 findings 제목: ${confirmed.map((f) => f.title).join(' | ') || '(없음)'}
 안 본 단위·미검증 주장·안 돌린 렌즈를 재점검하라. 새 finding은 missed_findings로(직접 확인한 것만 — 추측 금지),
 추가 분석이 필요한 단위는 unexplored_units로(이미 본 단위 재탕 금지). 없으면 둘 다 빈 배열.`,
-      { label: `critic:r${round}`, phase: `Round ${round}`, schema: CRITIC, model: criticModel },
+      `critic:r${round}`,
+      `Round ${round}`,
+      CRITIC,
+      criticModel,
     ).catch(() => null)
 
     if (cr) {

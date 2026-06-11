@@ -62,4 +62,4 @@ case "$MODE" in
 esac
 
 echo
-echo "✅ sync-machine 완료 ($MODE)"
+echo "✅ sync-machine 완료 ($MODE)   (의존성 전체 점검: bash scripts/doctor.sh)"

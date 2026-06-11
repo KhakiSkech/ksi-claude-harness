@@ -23,6 +23,12 @@ ultracode-first **멀티에이전트 워크플로 하네스**를 팀에 배포�
 
 ## 설치 (팀)
 
+### 0. 의존성 점검 (먼저)
+```
+bash scripts/doctor.sh
+```
+필수(git·python3·claude)와 권장(ruff·Playwright — **없으면 해당 기능이 조용히 빠짐**)을 점검하고 OS별 설치 힌트를 출력한다. 자동 설치는 의도적으로 안 함(패키지 매니저·sudo가 머신마다 달라서 — 힌트만).
+
 ### 1. 플러그인 — 둘 중 하나
 
 **(a) 프로젝트 단위 자동활성화 (팀 공유, 권장)** — 프로젝트의 `.claude/settings.json`에 `templates/project-settings.example.json` 내용을 병합하고 git 체크인(repo 좌표는 `KhakiSkech/ksi-claude-harness`로 설정돼 있음). 팀원이 프로젝트를 신뢰(trust)하면 자동 등록·활성화된다. private repo라 팀원은 GitHub 접근 권한(collaborator)이 필요하다.
@@ -54,6 +60,7 @@ alias claude='claude --dangerously-skip-permissions --settings '\''{"ultracode":
 ---
 
 ## 요구사항 (스킬·훅이 100% 동작하려면)
+한 번에 점검: `bash scripts/doctor.sh` (필수/권장/프로젝트별 구분 + OS별 설치 힌트).
 - **ruff 훅:** `ruff`가 PATH에(보통 `~/.local/bin/ruff`). 없으면 **조용히 skip**된다 — .py 저장 시 lint 피드백이 한 번도 안 보이면 ruff 설치/PATH부터 확인.
 - **ui-audit / ui-render 훅:** Node + Playwright(브라우저 설치), 그리고 앱을 띄울 수 있는 환경. auth-gated 앱은 시각감사에 세션/시드가 필요.
 - **워크플로 스킬(codebase-audit·ui-audit):** ultracode 세션(또는 Workflow 도구 사용 권한)에서 fan-out이 의미 있다.

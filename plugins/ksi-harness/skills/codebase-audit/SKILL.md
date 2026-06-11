@@ -15,6 +15,12 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 - 큰 감사: fan-out + adversarial(새 finding 마를 때까지, **상한 2패스**) + 완성도 critic.
 - 단일 파일·1~2줄 변경엔 이 스킬 금지 — 직접 또는 worker 1개(코드 수정에 scout/Haiku 금지).
 
+## 0.5 재사용 루프 골격 (매번 0에서 재조립 금지 — 의미를 못박는다)
+`pipeline(units, analyze, verify)`는 **고정 깊이 단발**(analyze 1패스 + verify 1패스)이다. 완성도가 필요한 큰 감사는 §5의 critic→verify→재투입 루프를 얹어 수렴시킨다. 스크립트가 dial만 바꾸도록 **기본값을 박는다**:
+- verify 트리거 = critical/high(P1/P2) 기본, dial로 전체 확장 · survivor = `verdict≠'refuted' && corrected≠'none'` · 정지 = critic 무소득 또는 2라운드.
+- 한 줄 의사코드: `round R: pipeline(pending, analyze, verify) → survivors; new = verify(critic(survivors)); new가 있고 R<2면 다음 round의 pending=new, 아니면 정지.`
+이 기본값을 스킬이 들고 있으면 트리거·survivor·정지 기준이 스크립트마다 즉흥이던 문제가 봉합되어 **세션 간 재현성·비교가능성**이 생긴다.
+
 ## 1. 분해
 대상을 독립 단위로 나눈다(모듈/레포/레이어/관심사). 각 단위 = 한 워커의 몫.
 
@@ -32,8 +38,10 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 - workflow: `agent(\`반증하라: ${finding}\`, {model: 'opus', schema: VERDICT})`
 - **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·자금 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐.
 
-## 5. 완성도 critic — opus tier
-별도 렌즈로 "빠진 게 뭔가 — 안 본 모듈·미검증 주장·미확인 가정"을 재점검. 나온 게 있으면 다음 패스 일감(상한 내).
+## 5. 완성도 critic → verify 재투입 (수렴 루프, opus tier)
+별도 렌즈로 "빠진 게 뭔가 — 안 본 모듈·미검증 주장·미확인 가정·안 돌린 렌즈"를 재점검.
+- **critic 산출물을 그냥 채택하지 않는다** — critic이 낸 새 finding도 §4 adversarial verify를 한 번 더 통과시켜 살아남은 것만 채택(값싼 critic도 그럴듯한 거짓을 낸다 — verify 우회 금지). 1차 findings는 verify로 걸렀는데 critic 추가분만 무검증 통과하는 게 흔한 누락이다.
+- critic이 '안 본 단위'를 반환하고 round < 상한(2)이면 그 단위를 **다음 라운드의 분석 fan-out으로 재투입**. critic 무소득이거나 상한 도달이면 정지. (pipeline은 고정 깊이 단발이므로, 이 재투입이 없으면 critic은 루프가 아니라 terminal one-shot이 된다.)
 
 ## 6. 종합
 severity로 정렬한 findings + 구체 권고. 반복 결함은 단위별 땜질이 아니라 **구조적 처방**(공유 모듈/규칙/SSOT).

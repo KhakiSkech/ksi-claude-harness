@@ -19,6 +19,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/ui-render-check.sh",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/backend-verify-check.sh",
+            "timeout": 30
           }
         ]
       }

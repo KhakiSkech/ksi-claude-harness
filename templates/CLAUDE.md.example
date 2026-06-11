@@ -32,7 +32,8 @@
 - **코딩 품질은 기본기다** — 주변 코드에 맞춰 잘 짠다. 특정 메트릭(응집도·결합도 등)을 강제하지 않는다.
 - "완료" 선언 전 검증을 **실제로 실행**: Python=ruff/mypy/pytest, TS=typecheck/test. 실패·skip은 정직하게 보고. (.py 저장 시 ruff는 플러그인 훅이 자동 점검 — standalone `ruff`/`mypy` 바이너리는 `ruff .`/`mypy .`, pytest만 `python3 -m pytest`.)
 - **"green ≠ 작동" — 픽스처가 실제 흐름을 우회하면 검증이 아니다.** 시드·테스트가 파생/종단 상태를 손으로 주입(`status=finalized`, 점수 직접 적재)하면 가짜 초록불이다. 핵심 사용자 여정은 **실제 상태 전이(생성→…→최종화→산출물)를 적어도 한 번 통과**시켜 확인한다. (워크플로 self-report "완료/0"도 신뢰 말고 **최종 캐시클린 재검증** — incremental 캐시가 중간 상태로 거짓 신호를 낼 수 있다.)
-- **UI 변경은 "타입·테스트 통과"로 끝나지 않는다 — 렌더를 눈으로 본다.** `.tsx/.jsx/.css` 등 화면 변경 시 앱을 띄워 desktop + mobile(390px) 스크린샷을 Read로 확인하고 깨짐(오버플로·한글 텍스트 세로쪼개짐·빈/희박 상태·터치타겟<44px)을 점검. **e2e 통과 ≠ 시각적으로 멀쩡함.** 전 페이지 점검은 `ui-audit` 스킬. (플러그인의 Stop 훅이 미커밋 화면 편집 시 시각검증을 넛지한다 — fan-out 서브에이전트 편집도 포함.)
+- **UI 기능은 짓기 전에 'UX 목표'를 먼저 적는다 (design-side — 검증기는 측정할 목표가 없으면 '안 깨졌나'만 잰다).** 화면 착수 전 한 단락: 타깃 페르소나 · 핵심 동선 단계 예산(핵심 산출물까지 N클릭) · 필수 상태 인벤토리(빈/희박/아주 긴 이름/에러/로딩) · 마이크로카피 SSOT · 접근성 예산(터치타겟≥44px·대비 AA). 이게 곧 `ui-audit`의 측정 기준이 된다 — 목표 없는 검증은 '잘 구성됐나'만 통과시킨다.
+- **UI 변경은 "타입·테스트 통과"로 끝나지 않는다 — 렌더를 눈으로, 동선까지 본다.** `.tsx/.jsx/.css` 등 화면 변경 시 앱을 띄워 desktop + mobile(390px) 스크린샷을 Read로 확인. ① 시각(오버플로·한글 텍스트 세로쪼개짐·빈/희박·터치타겟<44px) ② 동선·사용성('green≠작동'의 UI판: 핵심 산출물 도달성·죽은 메뉴/리다이렉트·빈/에러 탈출구·상태 라벨이 영어 raw/코드값이 아니라 사람 말인가). **e2e 통과 ≠ 시각적으로 멀쩡함.** 전 페이지·역할별 점검은 `ui-audit` 스킬. (플러그인 Stop 훅이 미커밋 화면 편집 시 시각+동선 검증을 넛지 — fan-out 서브에이전트 편집 포함.)
 - **한글 UI 기본값:** 텍스트 컨테이너는 `word-break: keep-all`을 기본으로, 표·카드는 모바일에서 가로스크롤이 아니라 세로 reflow를 설계 단계에서 계획. 빈·희박·아주 긴 이름 데이터로 본다.
 
 ## 스택 기본값 (팀에 맞게 조정)
@@ -41,4 +42,4 @@ Python(FastAPI/Pydantic/pytest/ruff/mypy) · Next.js+TS · Docker · Supabase ·
 ## 제공 도구 (ksi-harness 플러그인)
 - 스킬: `deep-interview`(착수 전 의도 확정) · `brainstorm`(발산→수렴) · `ui-audit`(UI 시각 검증) · `codebase-audit`(백엔드/일반 코드 병렬 감사→adversarial 검증→종합). 플러그인 설치 시 `/ksi-harness:<skill>`로 호출(또는 그냥 스킬명으로).
 - 서브에이전트는 **tier 전용 워커만** — `worker`(Sonnet high, 위임 코드 구현)·`scout`(Haiku, 경량 쓰기 잡일 — **코드 파일 수정 금지**). 도메인 페르소나는 두지 않는다(전문성은 프롬프트/맥락에). 그 외는 빌트인(Explore=Haiku 탐색·Plan·general-purpose·code-review) + workflow inline agent.
-- 검증 게이트 훅(플러그인): `.py` 저장 시 ruff lint(advisory) · 화면 파일 미커밋 편집 시 UI 시각검증 넛지(Stop).
+- 검증 게이트 훅(플러그인): `.py` 저장 시 ruff lint(advisory, PostToolUse) · Stop 시 — 미커밋 화면(.tsx/.jsx/.css) 편집엔 UI 시각+동선 검증 넛지, 미커밋 백엔드 상태전이/테스트(.py: tests·services·alembic) 편집엔 'green≠작동' 넛지(픽스처 우회·캐시 가짜green·DB dialect 분기). fan-out 서브에이전트 편집 포함.

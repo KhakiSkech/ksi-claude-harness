@@ -34,6 +34,8 @@ ultracode-first **멀티에이전트 워크플로 하네스**를 팀에 배포�
 ```
 (로컬 테스트는 `/plugin marketplace add ./ksi-claude-harness`)
 
+> ⚠️ **이중 활성화 주의 (원작자/기존 사용자):** `~/.claude/{skills,agents,hooks}`에 이 골격의 **로컬 사본**을 이미 둔 머신에서는 플러그인을 설치하지 말 것(또는 설치 전에 로컬 사본과 `settings.json`의 해당 훅 블록을 제거). 둘 다 두면 스킬이 bare+네임스페이스(`/ui-audit` + `/ksi-harness:ui-audit`)로 중복되고 **같은 Stop 훅이 매번 2회 발화**한다. 로컬 사본이 없는 일반 팀원은 해당 없음.
+
 ### 2. doctrine 템플릿 복사
 플러그인은 전역 지침을 심을 수 없다. `templates/CLAUDE.md.example`를 `~/.claude/CLAUDE.md`(개인 전역) 또는 프로젝트 `CLAUDE.md`에 복사하고, **스택 섹션을 팀에 맞게 조정**한다.
 
@@ -51,7 +53,7 @@ alias claude='claude --dangerously-skip-permissions --settings '\''{"ultracode":
 ---
 
 ## 요구사항 (스킬·훅이 100% 동작하려면)
-- **ruff 훅:** `ruff`가 PATH에(보통 `~/.local/bin/ruff`). 없으면 graceful skip.
+- **ruff 훅:** `ruff`가 PATH에(보통 `~/.local/bin/ruff`). 없으면 **조용히 skip**된다 — .py 저장 시 lint 피드백이 한 번도 안 보이면 ruff 설치/PATH부터 확인.
 - **ui-audit / ui-render 훅:** Node + Playwright(브라우저 설치), 그리고 앱을 띄울 수 있는 환경. auth-gated 앱은 시각감사에 세션/시드가 필요.
 - **워크플로 스킬(codebase-audit·ui-audit):** ultracode 세션(또는 Workflow 도구 사용 권한)에서 fan-out이 의미 있다.
 
@@ -62,12 +64,13 @@ alias claude='claude --dangerously-skip-permissions --settings '\''{"ultracode":
 - 활발한 개발: `plugin.json`/`marketplace.json`의 `version`을 생략하면 git commit SHA가 버전이 된다.
 - 안정 배포: semantic versioning(`0.1.0` → bump). 마켓플레이스 `source`에 `ref`(tag/branch)로 stable/latest 채널 분리 가능.
 
-## 배포 전 검증
+## 배포 전 검증 (repo **루트의 부모** 디렉토리에서 실행)
 ```
-claude plugin validate ./plugins/ksi-harness     # 플러그인 매니페스트
-claude plugin validate ./ksi-claude-harness      # 마켓플레이스 root
-/plugin marketplace add ./ksi-claude-harness      # 로컬 설치 테스트
+claude plugin validate ./ksi-claude-harness/plugins/ksi-harness   # 플러그인 매니페스트
+claude plugin validate ./ksi-claude-harness                       # 마켓플레이스 root
+/plugin marketplace add ./ksi-claude-harness                      # 로컬 설치 테스트
 ```
+(repo 루트 안에서라면 `claude plugin validate .` 이 마켓플레이스, `claude plugin validate ./plugins/ksi-harness` 가 플러그인.)
 
 ## 안 들어있는 것 (의도적 — 프라이버시)
 개인 메모리(프로필·진행 프로젝트·이메일·플랜·머신정보), MCP auth 캐시, credentials, 세션 기록은 **전부 제외**. 이 repo는 골격만이다.

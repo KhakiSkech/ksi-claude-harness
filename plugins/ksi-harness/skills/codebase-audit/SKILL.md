@@ -12,7 +12,7 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 ## 0. 스코프 dial (먼저 — ultracode는 비제약이 기본이라 의도적으로 줄인다)
 - 작은 substantive: 워커 1개 + 검증 1패스.
 - 중간: 모듈 N개 = 워커 N개, adversarial 1패스.
-- 큰 감사: fan-out + adversarial(새 finding 마를 때까지, **상한 2패스**) + 완성도 critic.
+- 큰 감사: fan-out + adversarial(새 finding 마를 때까지, **상한 2패스**) + 완성도 critic. **확장 옵션:** critic이 미탐색 단위를 반환하면 상한 내에서 다음 라운드 analyze fan-out으로 자동 편입(§5 재투입 루프) — 고정 분해로 안 본 표면이 남을 때.
 - 단일 파일·1~2줄 변경엔 이 스킬 금지 — 직접 또는 worker 1개(코드 수정에 scout/Haiku 금지).
 
 ## 0.5 재사용 루프 골격 (매번 0에서 재조립 금지 — 의미를 못박는다)
@@ -37,6 +37,7 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 각 high/medium finding을 **다른 에이전트가 반증 시도** — 실제 파일/근거를 다시 열어 거짓양성·과장·지어낸 명령/경로를 거른다. 살아남은 것만 채택. 확실치 않으면 보수적으로 의심.
 - workflow: `agent(\`반증하라: ${finding}\`, {model: 'opus', schema: VERDICT})`
 - **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·비가역 데이터 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐.
+- **1M 컨텍스트는 비용이 아니라 용량 결정**(opus/메인 1M 세션이면 자동 부착, 가격 프리미엄 없음): 단일 finding verify엔 과프로비저닝이나 무해, **cross-finding critic·전모듈 종합**처럼 많은 근거를 동시에 들어야 하는 단계엔 정당.
 
 ## 5. 완성도 critic → verify 재투입 (수렴 루프, opus tier)
 별도 렌즈로 "빠진 게 뭔가 — 안 본 모듈·미검증 주장·미확인 가정·안 돌린 렌즈"를 재점검.

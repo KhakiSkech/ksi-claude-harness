@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop hook: 이 세션에서 프론트엔드 화면 파일(.tsx/.jsx/.vue/.svelte)을 '직접' 수정했는데
 # '완료'하려 할 때, 렌더를 실제로 봤는지 1회 넛지한다(시각 검증 게이트의 프론트 대응물).
-# - 백엔드 ruff 훅과 짝: 백엔드=자동 lint, 프론트=시각 확인 넛지.
+# - 3-훅 게이트 대칭: 백엔드=정적 lint(ruff, 자동 주입)+동작 넛지(backend-verify, Stop) / 프론트=시각+동선 넛지(이 훅, Stop).
 # - 발화 조건 = '이 세션 transcript의 Edit/Write/MultiEdit' ∩ 'git 미커밋 프론트 변경'.
 #   ① transcript: 메인 루프 직접 편집 + 이 세션의 서브에이전트/workflow 편집.
 #      서브에이전트 편집은 메인 transcript에 안 잡히므로(isSidechain 0개), 세션 사이드카

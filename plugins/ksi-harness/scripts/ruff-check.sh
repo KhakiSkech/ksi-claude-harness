@@ -42,7 +42,7 @@ if [ $rc -ge 2 ]; then
   # 동일 에러가 1시간 내 이미 통지됐으면 침묵; 새 작업세션·다른 에러면 다시 통지(은폐 방지).
   sentinel="${TMPDIR:-/tmp}/claude-ruff-cfgerr.last"
   h="$(printf '%s' "$out" | cksum | tr -d ' ')"
-  now="$(date +%s)"
+  now="$(date +%s 2>/dev/null)"; : "${now:=0}"   # date 실패 환경 방어(타이머 무력화 방지)
   if [ -f "$sentinel" ]; then
     read -r last_h last_t < "$sentinel" 2>/dev/null || { last_h=''; last_t=0; }
     if [ "$h" = "$last_h" ] && [ $((now - ${last_t:-0})) -lt 3600 ]; then

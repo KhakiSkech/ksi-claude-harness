@@ -150,12 +150,14 @@ root = _git(["rev-parse", "--show-toplevel"])
 if diff is None or untracked is None or not root:
     sys.exit(0)
 base = root[0]
+# normcase: Windows NTFS는 대소문자 무시라 git toplevel과 tool_use 경로의 케이스가 갈리면
+# 교차가 공집합이 되는 거짓음성 발생 — normcase로 케이스폴드(POSIX에선 no-op).
 uncommitted = {
-    os.path.normpath(os.path.join(base, rel))
+    os.path.normcase(os.path.normpath(os.path.join(base, rel)))
     for rel in (*diff, *untracked)
     if rel.strip()
 }
-changed = {os.path.normpath(p) for p in changed} & uncommitted
+changed = {os.path.normcase(os.path.normpath(p)) for p in changed} & uncommitted
 
 n = len(changed)
 if n == 0:

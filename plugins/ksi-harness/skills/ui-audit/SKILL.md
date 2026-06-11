@@ -28,12 +28,13 @@ when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 �
    - **발견성/콜드스타트:** 핵심 결과물이 nav에서 도달 가능한가 · 신규/각 역할이 길을 잃나 · 클릭하면 리다이렉트되는 죽은 메뉴는 없나 · 기능이 '만든 사람 머릿속' 위치(예: 결과물이 관리 메뉴 깊숙이)에 묻혀 있나. (화면 안 깨졌어도 도달 못 하면 결함)
    - **흐름 마찰(시각 너머):** 핵심 잡(예: 생성→검토→완료→결과물)을 몇 단계·클릭에 끝내나 · 중복 경로 · 숨은 1차 CTA · 되돌리기 없는 위험 동작. **단계 예산 초과는 화면이 안 깨졌어도 결함**(design-side spec의 step-budget 대비).
    - **에러·복구·엣지('green≠작동'의 UI판):** parse 실패·필수값 누락·권한 차단·완료 잠금에서 사용자가 막히지 않고 빠져나오나 · 에러 메시지가 raw 키/영어/HTTP코드가 아니라 사람 말인가 · 미리 완료 처리된 픽스처가 아니라 실제 상태(빈/생성중/실패)가 렌더되나.
-   - **용어 SSOT·마이크로카피:** 같은 개념이 화면마다 다른 라벨로 새지 않나 — **라벨 SSOT 파일(labels.ts 등)을 스크린샷과 함께 Read해 실제 표기와 대조** · 내부코드(group_code·reason_code 등)·영어 잔존 노출 · 빈 상태 문구가 다음 행동을 안내하나. (senior-fitness의 이중 분류 SSOT 모순·영어 raw 에러가 이 렌즈에서 나왔다.)
+   - **용어 SSOT·마이크로카피:** 같은 개념이 화면마다 다른 라벨로 새지 않나 — **라벨 SSOT 파일(labels.ts 등)을 스크린샷과 함께 Read해 실제 표기와 대조** · 내부코드(group_code·reason_code 등)·영어 잔존 노출 · 빈 상태 문구가 다음 행동을 안내하나. (실전에서 '같은 대상에 모순된 분류 라벨 동시 표기'·'영어 raw 에러 노출' 같은 최고 영향 결함이 이 렌즈에서 나온다.)
    - 정렬·간격 드리프트, 이모지 vs 아이콘 혼용 등 일관성
    - 모델 티어링: 캡처·인벤토리 잡일=`'haiku'`(scout/Explore) · 스크린샷 시각 감사=`agent({model: 'sonnet'})`(체크리스트 대조형 판독) · 발견성·역할게이팅·흐름단절 등 **맥락 추론 차원=`'opus'`** · adversarial 검증·완성도 critic=`agent({model: 'opus'})` · 검증 모순 시 tiebreak=메인급(미지정 inherit, 의도적으로만) · 종합·판정=메인. **verify·종합 호출도 alias 필수 — model 미지정 inherit는 메인급 tiebreak 슬롯에만**(세션 main이 Fable이면 미지정 verify가 의도 없이 Fable로 샌다). 그 외 미지정 agent()는 전부 메인 inherit이므로 alias로 명시. **effort는 inline `agent()`에 못 준다(세션 inherit) — 고난도 판정 effort를 task별로 고정하려면 effort-frontmatter 서브에이전트(worker) 경유.**
 
-4. **adversarial 검증 + 완성도 critic → 재투입** — 각 finding을 *다른* 에이전트(opus tier)가 같은 스크린샷으로 반증 시도(거짓양성·과장 제거). 살아남은 것만 채택.
+4. **adversarial 검증 + 완성도 critic → 재투입** — 각 critical/high finding(기본 — dial로 확장)을 *다른* 에이전트(opus tier)가 같은 스크린샷으로 반증 시도(거짓양성·과장 제거). 살아남은 것만 채택.
    - **완성도 critic(opus):** 안 본 페이지·뷰포트·역할·빈/초과 상태가 남았나 1패스 재점검. **critic이 낸 새 결함도 위 adversarial verify를 한 번 더 통과시켜 채택**(critic 산출물 무검증 통과 금지), 남은 게 있고 상한(2패스) 내면 재캡처·재감사. codebase-audit §5와 대칭의 수렴 루프 — ui-audit이 선형이라 빠졌던 단계.
+   - **실행형 골격:** 감사·verify·critic 루프는 `audit-loop` saved workflow 재사용(repo `templates/workflows/audit-loop.js` → `~/.claude/workflows/` 복사; units=페이지/차원별 프롬프트+스크린샷 경로, context=design-side spec+제품 맥락). 캡처(§2)는 골격 밖에서 먼저.
 
 5. **구조적 처방** — 여러 페이지에 반복되는 결함은 페이지별 땜질이 아니라 **공유 프리미티브로 한 번에**: `PageHeader` / `ResponsiveTable`(모바일 reflow) / `EmptyState` / 라벨 맵(SSOT). 일관성을 노력이 아니라 구조로 강제.
 

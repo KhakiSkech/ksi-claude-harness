@@ -1,0 +1,188 @@
+export const meta = {
+  name: 'audit-loop',
+  description: '재사용 감사 루프 — analyze fan-out → adversarial verify → critic(검증 후 재투입) → 수렴. codebase-audit/ui-audit §0.5의 실행형 골격.',
+  whenToUse: '병렬 감사가 필요할 때 매번 pipeline을 재작성하지 말고 units(키+프롬프트)와 dial만 args로 넘긴다.',
+}
+
+// ---- args (dial) ----
+// units: [{key, prompt}]  필수 — 단위별 분석 지시(출력 지시는 불필요, 스키마가 강제).
+// context: 모든 에이전트 프롬프트 앞에 붙는 공통 맥락(제품·페르소나·경로·design-side spec). 강력 권장.
+// analyzeModel='sonnet' | verifyModel='opus' | criticModel='opus'  (alias만 — 풀 ID 금지)
+// maxRounds — critic 재투입 포함 상한: 기본 2, 천장 4(스킬 문서의 '상한 2'는 기본값 서술). verifySeverities=['critical','high'] — verify 트리거(dial).
+// critic=true — false면 critic 생략(작은 감사).
+// args가 JSON-encoded 문자열로 도착하는 호출 경로 방어
+let A = args || {}
+if (typeof A === 'string') {
+  try { A = JSON.parse(A) } catch (e) { return { error: 'args가 문자열인데 JSON 파싱 실패 — 객체로 넘기거나 유효한 JSON으로' } }
+}
+const units0 = Array.isArray(A.units) ? A.units.filter((u) => u && u.key && u.prompt) : []
+if (!units0.length) return { error: 'args.units가 비어 있음 — [{key, prompt}] 필요' }
+const CTX = A.context || ''
+const analyzeModel = A.analyzeModel || 'sonnet'
+const verifyModel = A.verifyModel || 'opus'
+const criticModel = A.criticModel || 'opus'
+const maxRounds = Math.max(1, Math.min(4, A.maxRounds || 2))
+const verifySev = Array.isArray(A.verifySeverities) ? A.verifySeverities : ['critical', 'high']
+const useCritic = A.critic !== false
+
+const FINDINGS = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary', 'findings'],
+  properties: {
+    summary: { type: 'string', description: '이 단위의 전반 평가 1~3문장 (한국어)' },
+    findings: {
+      type: 'array',
+      maxItems: 12,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['title', 'severity', 'where', 'evidence', 'impact', 'recommendation', 'confidence'],
+        properties: {
+          title: { type: 'string' },
+          severity: { enum: ['critical', 'high', 'medium', 'low'] },
+          where: { type: 'string', description: '파일:줄 또는 화면/위치' },
+          evidence: { type: 'string', description: '실제로 읽고 본 것 — 추측 금지, 불확실하면 confidence를 낮춰 명시' },
+          impact: { type: 'string' },
+          recommendation: { type: 'string' },
+          confidence: { enum: ['high', 'medium', 'low'] },
+        },
+      },
+    },
+  },
+}
+
+const VERDICT = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['verdict', 'corrected_severity', 'note'],
+  properties: {
+    verdict: { enum: ['confirmed', 'refuted', 'adjust'], description: 'confirmed=실재·심각도 적정, adjust=실재하나 심각도/표현 수정, refuted=환각·오류·재현불가' },
+    corrected_severity: { type: ['string', 'null'], enum: ['critical', 'high', 'medium', 'low', null] },
+    note: { type: 'string', description: '검증 근거 (실제 재확인 결과, 한국어)' },
+  },
+}
+
+const CRITIC = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['missed_findings', 'unexplored_units'],
+  properties: {
+    missed_findings: { type: 'array', maxItems: 8, items: FINDINGS.properties.findings.items },
+    unexplored_units: {
+      type: 'array',
+      maxItems: 6,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['key', 'prompt'],
+        properties: {
+          key: { type: 'string' },
+          prompt: { type: 'string', description: '다음 라운드 분석 지시(공통 context는 자동으로 앞에 붙음)' },
+        },
+      },
+    },
+  },
+}
+
+const keyOf = (f) => `${f.title}@@${f.where}`
+const seen = new Set()
+const confirmed = []
+const refuted = []
+
+const verifyOne = (f, round) =>
+  agent(
+    `${CTX}
+## adversarial 검증 — 반증을 시도하라
+아래 finding이 실재하는지 회의적으로 재검증한다. 인용된 파일/근거를 직접 다시 열어 확인하고 환각·과장·심각도 오류를 잡는다.
+기본 태도는 의심 — 증거가 약하면 refuted 또는 adjust. 명백히 실재하면 confirmed.
+
+제목: ${f.title}
+심각도(주장): ${f.severity}
+위치: ${f.where}
+증거(주장): ${f.evidence}
+영향(주장): ${f.impact}`,
+    { label: `verify:${String(f.title).slice(0, 24)}`, phase: `Round ${round}`, schema: VERDICT, model: verifyModel },
+  )
+    .then((v) => ({ ...f, verdict: v }))
+    .catch(() => ({ ...f, verdict: null }))
+
+const absorb = (f, unit) => {
+  const v = f.verdict
+  if (v && v.verdict === 'refuted') refuted.push({ ...f, unit })
+  else confirmed.push({ ...f, unit, final_severity: (v && v.verdict === 'adjust' && v.corrected_severity) || f.severity })
+}
+
+const coveredUnits = []
+let pending = units0
+let round = 0
+
+while (pending.length && round < maxRounds) {
+  round++
+  phase(`Round ${round}`)
+  log(`Round ${round}: ${pending.length}개 단위 분석 (analyze=${analyzeModel}, verify=${verifyModel})`)
+  coveredUnits.push(...pending.map((u) => u.key))
+
+  // canonical no-barrier: 단위별로 분석이 끝나는 즉시 그 단위의 verify가 돈다
+  const res = await pipeline(
+    pending,
+    (u) => agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}`, phase: `Round ${round}`, schema: FINDINGS, model: analyzeModel }),
+    (r, u) => {
+      if (!r) return { unit: u.key, findings: [] }
+      const fresh = (r.findings || []).filter((f) => !seen.has(keyOf(f)))
+      fresh.forEach((f) => seen.add(keyOf(f)))
+      const toV = fresh.filter((f) => verifySev.includes(f.severity))
+      const rest = fresh.filter((f) => !verifySev.includes(f.severity)).map((f) => ({ ...f, verdict: { verdict: 'unverified', corrected_severity: null, note: 'verify 트리거 미해당(dial)' } }))
+      if (!toV.length) return { unit: u.key, findings: rest }
+      return parallel(toV.map((f) => () => verifyOne(f, round))).then((vs) => ({ unit: u.key, findings: [...vs.filter(Boolean), ...rest] }))
+    },
+  )
+  for (const r of res.filter(Boolean)) for (const f of r.findings) absorb(f, r.unit)
+
+  pending = []
+  if (useCritic) {
+    const cr = await agent(
+      `${CTX}
+## 완성도 critic — 빠진 게 뭔가
+지금까지 분석한 단위: ${coveredUnits.join(', ')}
+확정 findings 제목: ${confirmed.map((f) => f.title).join(' | ') || '(없음)'}
+안 본 단위·미검증 주장·안 돌린 렌즈를 재점검하라. 새 finding은 missed_findings로(직접 확인한 것만 — 추측 금지),
+추가 분석이 필요한 단위는 unexplored_units로(이미 본 단위 재탕 금지). 없으면 둘 다 빈 배열.`,
+      { label: `critic:r${round}`, phase: `Round ${round}`, schema: CRITIC, model: criticModel },
+    ).catch(() => null)
+
+    if (cr) {
+      // critic 산출물도 verify 재통과 — 무검증 채택 금지(§5)
+      const fresh = (cr.missed_findings || []).filter((f) => !seen.has(keyOf(f)))
+      fresh.forEach((f) => seen.add(keyOf(f)))
+      if (fresh.length) {
+        log(`critic이 새 finding ${fresh.length}건 → verify 재통과`)
+        const vs = (await parallel(fresh.map((f) => () => verifyOne(f, round)))).filter(Boolean)
+        for (const f of vs) absorb(f, 'critic')
+      }
+      pending = (cr.unexplored_units || []).filter((u) => u && u.key && u.prompt && !coveredUnits.includes(u.key))
+      if (pending.length && round < maxRounds) log(`critic이 미탐색 ${pending.length}개 단위 반환 → Round ${round + 1} 재투입`)
+      else if (!fresh.length && !pending.length) log('critic 무소득 → 수렴, 정지')
+    }
+  }
+}
+
+const rank = { critical: 0, high: 1, medium: 2, low: 3 }
+confirmed.sort((a, b) => (rank[a.final_severity] ?? 9) - (rank[b.final_severity] ?? 9))
+
+return {
+  rounds: round,
+  units_covered: coveredUnits,
+  counts: {
+    confirmed: confirmed.length,
+    refuted: refuted.length,
+    by_severity: {
+      critical: confirmed.filter((f) => f.final_severity === 'critical').length,
+      high: confirmed.filter((f) => f.final_severity === 'high').length,
+      medium: confirmed.filter((f) => f.final_severity === 'medium').length,
+      low: confirmed.filter((f) => f.final_severity === 'low').length,
+    },
+  },
+  findings: confirmed,
+  refuted,
+}

@@ -17,9 +17,10 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 
 ## 0.5 재사용 루프 골격 (매번 0에서 재조립 금지 — 의미를 못박는다)
 `pipeline(units, analyze, verify)`는 **고정 깊이 단발**(analyze 1패스 + verify 1패스)이다. 완성도가 필요한 큰 감사는 §5의 critic→verify→재투입 루프를 얹어 수렴시킨다. 스크립트가 dial만 바꾸도록 **기본값을 박는다**:
-- verify 트리거 = critical/high(P1/P2) 기본, dial로 전체 확장 · survivor = `verdict≠'refuted' && corrected≠'none'` · 정지 = critic 무소득 또는 2라운드.
+- verify 트리거 = critical/high(P1/P2) 기본, dial로 전체 확장 · survivor = `verdict≠'refuted' && corrected≠'none'` · 정지 = critic 무소득 또는 상한 라운드(기본 2, dial로 최대 4).
 - 한 줄 의사코드: `round R: pipeline(pending, analyze, verify) → survivors; new = verify(critic(survivors)); new가 있고 R<2면 다음 round의 pending=new, 아니면 정지.`
 이 기본값을 스킬이 들고 있으면 트리거·survivor·정지 기준이 스크립트마다 즉흥이던 문제가 봉합되어 **세션 간 재현성·비교가능성**이 생긴다.
+**실행형 골격(권장):** repo의 `templates/workflows/audit-loop.js`를 `~/.claude/workflows/`(또는 프로젝트 `.claude/workflows/`)에 복사하면 위 루프가 saved workflow로 등록된다 — `units: [{key, prompt}]`와 dial(context·maxRounds·verifySeverities·analyzeModel·verifyModel)만 args로 넘겨 호출. 없으면 위 의사코드대로 author.
 
 ## 1. 분해
 대상을 독립 단위로 나눈다(모듈/레포/레이어/관심사). 각 단위 = 한 워커의 몫.
@@ -34,7 +35,7 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 - 어려운 추론이 필요한 단위만 `'opus'`로.
 
 ## 4. adversarial 검증 — opus tier (생략 금지)
-각 high/medium finding을 **다른 에이전트가 반증 시도** — 실제 파일/근거를 다시 열어 거짓양성·과장·지어낸 명령/경로를 거른다. 살아남은 것만 채택. 확실치 않으면 보수적으로 의심.
+각 critical/high finding(기본 — dial로 medium 이하 확장)을 **다른 에이전트가 반증 시도** — 실제 파일/근거를 다시 열어 거짓양성·과장·지어낸 명령/경로를 거른다. 살아남은 것만 채택. 확실치 않으면 보수적으로 의심. (§0.5 verify 트리거와 동일 기준 — 절마다 다르게 읽히면 안 된다.)
 - workflow: `agent(\`반증하라: ${finding}\`, {model: 'opus', schema: VERDICT})`
 - **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·비가역 데이터 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐.
 - **1M 컨텍스트는 비용이 아니라 용량 결정**(opus/메인 1M 세션이면 자동 부착, 가격 프리미엄 없음): 단일 finding verify엔 과프로비저닝이나 무해, **cross-finding critic·전모듈 종합**처럼 많은 근거를 동시에 들어야 하는 단계엔 정당.

@@ -1,12 +1,16 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "ksi-tools",
-  "owner": { "name": "KSI" },
+  "description": "ultracode-first 멀티에이전트 워크플로 하네스 — ksi-harness 플러그인 마켓플레이스 (모델 티어링·adversarial 검증·검증 게이트 baked-in)",
+  "owner": {
+    "name": "KSI"
+  },
   "plugins": [
     {
       "name": "ksi-harness",
       "source": "./plugins/ksi-harness",
       "description": "ultracode-first 멀티에이전트 워크플로 하네스 (스킬·tier 워커·검증 게이트 훅). doctrine 템플릿·권장 설정은 repo의 templates/ 참조.",
-      "version": "0.1.6"
+      "version": "0.1.7"
     }
   ]
 }

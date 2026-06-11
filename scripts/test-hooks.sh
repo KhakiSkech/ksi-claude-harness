@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# 검증 게이트 훅 3종의 행동 회귀 테스트 — 합성 git repo + 합성 transcript로 발화/침묵을 검사한다.
+# 훅 수정 후, 그리고 새 머신(Linux·macOS·Windows git-bash)에서 한 번 돌려 이식성을 확인한다.
+# 사용: scripts/test-hooks.sh [hooks-dir]   (기본: <repo>/plugins/ksi-harness/scripts)
+# 의존: bash·git·python3 (훅 자체와 동일). ruff는 없으면 해당 케이스 SKIP.
+set -u
+
+HOOKS="${1:-$(cd "$(dirname "$0")/.." && pwd)/plugins/ksi-harness/scripts}"
+[ -f "$HOOKS/ui-render-check.sh" ] || { echo "hooks-dir 불일치: $HOOKS"; exit 2; }
+
+fail=0
+pass() { echo "PASS  $1"; }
+failt() { echo "FAIL  $1"; fail=1; }
+
+T="$(mktemp -d)"
+trap 'rm -rf "$T"' EXIT
+(
+  cd "$T" && git init -q . && git config user.email t@t && git config user.name t &&
+  echo base > base.txt && git add . && git commit -qm base
+) || { echo "테스트 repo 생성 실패"; exit 2; }
+mkdir -p "$T/components" "$T/tests"
+printf 'export default function D(){return null}\n' > "$T/components/D.tsx"
+printf 'def test_x():\n    assert True\n' > "$T/tests/test_x.py"
+printf 'def helper():\n    pass\n' > "$T/util.py"
+
+TP="$T/transcript.jsonl"
+rec() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"%s"}}]}}\n' "$1"; }
+pay() { printf '{"transcript_path":"%s","cwd":"%s"}' "$TP" "$T"; }
+
+run_hook() { pay | bash "$HOOKS/$1"; }
+expect_block() {
+  out="$(run_hook "$1")"
+  case "$out" in *'"decision"'*'"block"'*) pass "$1 — $2" ;; *) failt "$1 — $2 (출력: ${out:0:60})" ;; esac
+}
+expect_silent() {
+  out="$(run_hook "$1")"
+  [ -z "$out" ] && pass "$1 — $2" || failt "$1 — $2 (발화함)"
+}
+
+echo "== Stop 훅: 발화 케이스 (미커밋 변경) =="
+rec "$T/components/D.tsx" > "$TP";  expect_block  ui-render-check.sh      "미커밋 .tsx → block"
+rec "$T/tests/test_x.py" > "$TP";   expect_block  backend-verify-check.sh "미커밋 tests/*.py → block"
+
+echo "== Stop 훅: 침묵 케이스 =="
+rec "$T/util.py" > "$TP";           expect_silent backend-verify-check.sh "순수 util.py → silent(경로 필터)"
+rec "$T/util.py" > "$TP";           expect_silent ui-render-check.sh      ".py는 프론트 훅 무관 → silent"
+( cd "$T" && git add -A && git commit -qm all )
+rec "$T/components/D.tsx" > "$TP";  expect_silent ui-render-check.sh      "커밋됨 → silent(git 교차)"
+rec "$T/tests/test_x.py" > "$TP";   expect_silent backend-verify-check.sh "커밋됨 → silent(git 교차)"
+
+echo "== Stop 훅: 루프 방지 + graceful =="
+for h in ui-render-check.sh backend-verify-check.sh; do
+  out="$(printf '{"stop_hook_active":true,"transcript_path":"%s","cwd":"%s"}' "$TP" "$T" | bash "$HOOKS/$h")"
+  [ -z "$out" ] && pass "$h — stop_hook_active 통과" || failt "$h — stop_hook_active에서 발화"
+  out="$(printf '{}' | bash "$HOOKS/$h")"
+  [ -z "$out" ] && pass "$h — 빈 입력 graceful" || failt "$h — 빈 입력에서 발화"
+done
+
+echo "== PostToolUse 훅: ruff =="
+if command -v ruff >/dev/null 2>&1; then
+  printf 'import os\n' > "$T/bad.py"   # F401 unused import
+  out="$(printf '{"tool_input":{"file_path":"%s"}}' "$T/bad.py" | bash "$HOOKS/ruff-check.sh")"
+  case "$out" in *additionalContext*) pass "ruff-check.sh — 위반 → 피드백 주입" ;; *) failt "ruff-check.sh — 위반인데 침묵" ;; esac
+  printf 'x = 1\n' > "$T/good.py"
+  out="$(printf '{"tool_input":{"file_path":"%s"}}' "$T/good.py" | bash "$HOOKS/ruff-check.sh")"
+  [ -z "$out" ] && pass "ruff-check.sh — 클린 → silent" || failt "ruff-check.sh — 클린인데 발화"
+else
+  echo "SKIP  ruff 미설치 — ruff 케이스 건너뜀(훅 자체는 graceful skip이 정상 동작)"
+fi
+
+echo
+[ $fail -eq 0 ] && echo "✅ 전체 통과" || echo "❌ 실패 있음"
+exit $fail

@@ -27,6 +27,9 @@ const criticModel = A.criticModel || 'opus'
 const maxRounds = Math.max(1, Math.min(4, A.maxRounds || 2))
 const verifySev = Array.isArray(A.verifySeverities) ? A.verifySeverities : ['critical', 'high']
 const useCritic = A.critic !== false
+// batchSize: 한 라운드의 analyze fan-out을 N개 단위씩 끊어 실행(청크 사이 barrier) — 동시
+// 실행 에이전트 수를 줄여 API rate-limit(TPM/ITPM) cascade 실패를 회피. 기본=전체(끊지 않음, 종전 동작).
+const batchSize = Math.max(1, A.batchSize || units0.length)
 // verify/critic = reviewer tier(opus·xhigh·read-only). reviewerAgent=false면 처음부터 model 기반.
 const reviewerAgent = A.reviewerAgent === undefined ? 'reviewer' : A.reviewerAgent
 // reviewer로 실행하되 미설치·미해석(agentType 미등록)이면 model 기반 opus로 폴백 —
@@ -137,21 +140,25 @@ while (pending.length && round < maxRounds) {
   log(`Round ${round}: ${pending.length}개 단위 분석 (analyze=${analyzeModel}, verify=${verifyModel})`)
   coveredUnits.push(...pending.map((u) => u.key))
 
-  // canonical no-barrier: 단위별로 분석이 끝나는 즉시 그 단위의 verify가 돈다
-  const res = await pipeline(
-    pending,
-    (u) => agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}`, phase: `Round ${round}`, schema: FINDINGS, model: analyzeModel }),
-    (r, u) => {
-      if (!r) return { unit: u.key, findings: [] }
-      const fresh = (r.findings || []).filter((f) => !seen.has(keyOf(f)))
-      fresh.forEach((f) => seen.add(keyOf(f)))
-      const toV = fresh.filter((f) => verifySev.includes(f.severity))
-      const rest = fresh.filter((f) => !verifySev.includes(f.severity)).map((f) => ({ ...f, verdict: { verdict: 'unverified', corrected_severity: null, note: 'verify 트리거 미해당(dial)' } }))
-      if (!toV.length) return { unit: u.key, findings: rest }
-      return parallel(toV.map((f) => () => verifyOne(f, round))).then((vs) => ({ unit: u.key, findings: [...vs.filter(Boolean), ...rest] }))
-    },
-  )
-  for (const r of res.filter(Boolean)) for (const f of r.findings) absorb(f, r.unit)
+  // canonical no-barrier: 단위별로 분석이 끝나는 즉시 그 단위의 verify가 돈다.
+  // batchSize로 동시 분석 단위 수를 제한(청크 사이는 barrier) — API rate-limit cascade 회피.
+  const analyzeStage = (u) =>
+    agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}`, phase: `Round ${round}`, schema: FINDINGS, model: analyzeModel })
+  const verifyStage = (r, u) => {
+    if (!r) return { unit: u.key, findings: [] }
+    const fresh = (r.findings || []).filter((f) => !seen.has(keyOf(f)))
+    fresh.forEach((f) => seen.add(keyOf(f)))
+    const toV = fresh.filter((f) => verifySev.includes(f.severity))
+    const rest = fresh.filter((f) => !verifySev.includes(f.severity)).map((f) => ({ ...f, verdict: { verdict: 'unverified', corrected_severity: null, note: 'verify 트리거 미해당(dial)' } }))
+    if (!toV.length) return { unit: u.key, findings: rest }
+    return parallel(toV.map((f) => () => verifyOne(f, round))).then((vs) => ({ unit: u.key, findings: [...vs.filter(Boolean), ...rest] }))
+  }
+  for (let i = 0; i < pending.length; i += batchSize) {
+    const chunk = pending.slice(i, i + batchSize)
+    if (pending.length > batchSize) log(`  배치 ${Math.floor(i / batchSize) + 1}/${Math.ceil(pending.length / batchSize)}: ${chunk.map((u) => u.key).join(', ')}`)
+    const res = await pipeline(chunk, analyzeStage, verifyStage)
+    for (const r of res.filter(Boolean)) for (const f of r.findings) absorb(f, r.unit)
+  }
 
   pending = []
   if (useCritic) {

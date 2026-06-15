@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 검증 게이트 훅 3종의 행동 회귀 테스트 — 합성 git repo + 합성 transcript로 발화/침묵을 검사한다.
+# 검증 게이트 훅 4종의 행동 회귀 테스트 — 합성 git repo + 합성 transcript로 발화/침묵을 검사한다.
 # 훅 수정 후, 그리고 새 머신(Linux·macOS·Windows git-bash)에서 한 번 돌려 이식성을 확인한다.
 # 사용: scripts/test-hooks.sh [hooks-dir]   (기본: <repo>/plugins/ksi-harness/scripts)
 # 의존: bash·git·python3 (훅 자체와 동일). ruff는 없으면 해당 케이스 SKIP.
@@ -67,6 +67,20 @@ if command -v ruff >/dev/null 2>&1; then
 else
   echo "SKIP  ruff 미설치 — ruff 케이스 건너뜀(훅 자체는 graceful skip이 정상 동작)"
 fi
+
+echo "== PostToolUse 훅: secret-scan =="
+rm -f "${TMPDIR:-/tmp}/claude-secret-scan.last"   # dedup sentinel 초기화(테스트 격리)
+# 시크릿 리터럴은 런타임 생성 — 테스트 소스에 비밀 패턴을 박지 않는다.
+AWSKEY="AKIA$(tr -dc 'A-Z0-9' </dev/urandom 2>/dev/null | head -c 16)"
+ss() { printf '{"tool_input":{"file_path":"%s"}}' "$1" | bash "$HOOKS/secret-scan.sh"; }
+printf 'KEY = "%s"\n' "$AWSKEY" > "$T/leak.py"
+case "$(ss "$T/leak.py")" in *additionalContext*) pass "secret-scan.sh — 하드코딩 키 → 경고" ;; *) failt "secret-scan.sh — 키인데 침묵" ;; esac
+printf 'x = 1\n' > "$T/noleak.py"
+out="$(ss "$T/noleak.py")"; [ -z "$out" ] && pass "secret-scan.sh — 클린 → silent" || failt "secret-scan.sh — 클린인데 발화"
+printf 'AWS_KEY=%s\n' "$AWSKEY" > "$T/.env.example"
+out="$(ss "$T/.env.example")"; [ -z "$out" ] && pass "secret-scan.sh — .env.example 제외 → silent" || failt "secret-scan.sh — 예시인데 발화"
+mkdir -p "$T/db/migrations"; printf 'DROP TABLE users;\n' > "$T/db/migrations/001.sql"
+case "$(ss "$T/db/migrations/001.sql")" in *additionalContext*) pass "secret-scan.sh — 파괴적 DDL → 경고" ;; *) failt "secret-scan.sh — DDL인데 침묵" ;; esac
 
 echo
 [ $fail -eq 0 ] && echo "✅ 전체 통과" || echo "❌ 실패 있음"

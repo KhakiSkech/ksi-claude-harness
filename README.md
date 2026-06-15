@@ -13,7 +13,7 @@ ultracode-first **멀티에이전트 워크플로 하네스**를 팀에 배포�
 | **플러그인 `ksi-harness`** | `plugins/ksi-harness/` | 아래 4종을 번들 |
 | · 스킬 4 | `skills/` | `deep-interview`(의도 확정 — UI면 UX 축 포함) · `brainstorm`(발산→수렴) · `codebase-audit`(백엔드 병렬 감사 + 수렴 루프) · `ui-audit`(프론트 **시각 + UX 플로우** 감사: 흐름 단계수·에러복구·용어 SSOT·마이크로카피) |
 | · tier 워커 3 | `agents/` | `scout`(Haiku 잡일 — 비코드 write) · `worker`(Sonnet high 구현) · `reviewer`(Opus xhigh, **read-only 검증** — adversarial 반증·완성도 critic) — 페르소나 아닌 **모델 tier 레버**(메인급은 움직이는 천장이라 에이전트 없음) |
-| · 검증 게이트 훅 3 | `scripts/` + `hooks/hooks.json` | `ruff-check.sh`(.py 저장 시 lint, advisory) · `ui-render-check.sh`(화면 미커밋 편집 시 시각+동선 검증 넛지, Stop) · `backend-verify-check.sh`(백엔드 상태전이/테스트 미커밋 편집 시 'green≠작동' 넛지: 픽스처 우회·캐시 가짜green·DB dialect, Stop) |
+| · 검증 게이트 훅 4 | `scripts/` + `hooks/hooks.json` | `ruff-check.sh`(.py 저장 시 lint, advisory) · `secret-scan.sh`(저장 시 **민감 쓰기 경고**, PostToolUse: 하드코딩 시크릿·파괴적 migration DDL·settings.json drift — 경고-only, 오탐방지·1h dedup) · `ui-render-check.sh`(화면 미커밋 편집 시 시각+동선 검증 넛지, Stop) · `backend-verify-check.sh`(백엔드 상태전이/테스트 미커밋 편집 시 'green≠작동' 넛지: 픽스처 우회·캐시 가짜green·DB dialect, Stop) |
 | **doctrine 템플릿** | `templates/CLAUDE.md.example` | 언어·ultracode·모델 티어링·자율성·검증 게이트 doctrine (플러그인으로는 전역 CLAUDE.md 배포 불가 → 직접 복사) |
 | **설정 예시** | `templates/*.json` | 팀 자동활성화 · 권장 사용자 설정 |
 

@@ -8,6 +8,12 @@ when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 �
 
 전제: **코드가 그럴듯해도 렌더에서 실패한다.** `overflow-auto`가 있어도 한글이 세로로 쪼개지고, 타입이 맞고 e2e가 초록불이어도 모바일 표는 으스러진다. 읽어서는 안 보이고 **봐야만 보인다.** 그래서 반드시 누군가는 스크린샷을 Read로 본다 — fan-out 하되 시각 확인을 프롬프트에 기본 탑재한다.
 
+## 0. 재사용 루프 골격 (매번 0에서 재조립 금지 — codebase-audit §0.5의 픽셀판)
+감사·adversarial verify·완성도 critic 루프는 `audit-loop` saved workflow를 재사용한다(repo `templates/workflows/audit-loop.js` → `~/.claude/workflows/` 복사). codebase-audit과 **같은 골격**을 픽셀 감사에 쓴다 — **캡처(§2)는 골격 밖에서 먼저** 하고, units에 페이지/차원별 프롬프트 + 스크린샷 경로를 넘긴다.
+`Workflow({scriptPath: '~/.claude/workflows/audit-loop.js', args: {units:[{key,prompt}], context, verifySeverities, maxRounds, analyzeModel, verifyModel, batchSize}})`
+- **기본값(스킬에 박혀 있음 — 스크립트는 dial만 바꾼다):** verify 트리거 = critical/high(dial `verifySeverities`로 확장) · verify·critic tier = **`reviewer`**(opus·xhigh·read-only, **부재 시 `model:opus`로 graceful 폴백** — 무검증 통과 금지) · 정지 = critic 무소득 또는 상한(`maxRounds` 기본 2·천장 4) · survivor = `verdict≠'refuted'` · analyze tier = sonnet(dial `analyzeModel`) · 페이지가 많으면 `batchSize`로 동시 캡처/감사 단위를 끊어 rate-limit 회피.
+- **context에 design-side spec을 반드시 넣는다** — 페르소나·핵심 동선 step-budget·상태 인벤토리·마이크로카피 SSOT·접근성 예산. 기준 없는 시각 감사는 '안 깨졌나'만 잰다(§1·전역 CLAUDE.md 작업방식과 동일 원칙).
+
 ## 절차
 
 1. **대상 확정**

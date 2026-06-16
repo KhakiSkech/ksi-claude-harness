@@ -167,7 +167,7 @@ while (pending.length && round < maxRounds) {
 ## 완성도 critic — 빠진 게 뭔가
 지금까지 분석한 단위: ${coveredUnits.join(', ')}
 확정 findings 제목: ${confirmed.map((f) => f.title).join(' | ') || '(없음)'}
-안 본 단위·미검증 주장·안 돌린 렌즈를 재점검하라. 새 finding은 missed_findings로(직접 확인한 것만 — 추측 금지),
+안 본 단위·미검증 주장·안 돌린 렌즈를 재점검하라. 특히 멀티액터/금전/평판/권한 surface면 어뷰징·무결성 불변식(역할겸직·경제무결성·게이밍·시간축권한)이 음성 케이스(self/cross/replay/state-change-after)로 점검됐는지 확인하라 — 생성 능력은 있으니 이 과녁을 빠뜨리지 말 것. 새 finding은 missed_findings로(직접 확인한 것만 — 추측 금지),
 추가 분석이 필요한 단위는 unexplored_units로(이미 본 단위 재탕 금지). 없으면 둘 다 빈 배열.`,
       `critic:r${round}`,
       `Round ${round}`,

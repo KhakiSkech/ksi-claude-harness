@@ -29,7 +29,7 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 `scout`(쓰기 필요 시) 또는 빌트인 **Explore**(read-only, 이미 Haiku)로 각 단위의 파일 인벤토리·grep 인덱싱·진입점을 빠르고 싸게 수집.
 
 ## 3. 분석 fan-out — Sonnet tier
-단위별 워커가 병렬 분석. **diverse-lens**로: 정확성/버그 · 보안 · 성능 · 일관성/중복 · 설정-의도 정합 · 문서-코드 drift · **핵심 여정 실행성**(시드/테스트/픽스처가 파생·종단 상태를 직접 세팅해 실제 flow를 우회하는 '가짜 green' smell — 완료 플래그 직접 세팅, 집계/파생값 직접 적재 등. 데모는 차 있는데 실사용 동선은 막혀 있나) · **제품 정체성 SSOT 정합**(README·CLAUDE.md 도메인 불변식/제품명과 모순되는 표면이 있나 — 리네이밍·피벗 후 구 명칭·구 컴포넌트·구 분류 잔재가 누수돼 신·구가 한 화면에 공존하나).
+단위별 워커가 병렬 분석. **diverse-lens**로: 정확성/버그 · 보안 · 성능 · 일관성/중복 · 설정-의도 정합 · 문서-코드 drift · **핵심 여정 실행성**(시드/테스트/픽스처가 파생·종단 상태를 직접 세팅해 실제 flow를 우회하는 '가짜 green' smell — 완료 플래그 직접 세팅, 집계/파생값 직접 적재 등. 데모는 차 있는데 실사용 동선은 막혀 있나) · **제품 정체성 SSOT 정합**(README·CLAUDE.md 도메인 불변식/제품명과 모순되는 표면이 있나 — 리네이밍·피벗 후 구 명칭·구 컴포넌트·구 분류 잔재가 누수돼 신·구가 한 화면에 공존하나) · **어뷰징·무결성 불변식**(보안=auth/IDOR/injection과 **분리** — '인증상 허용되나 비즈니스룰상 금지': 역할 겸직 self-review/self-finalize · 경제 무결성 환불≤수금·멱등 결제·서버권위 가격 · 게이밍 다중계정 혜택리셋·self-count · 시간축 권한 ban/만료 후 보호동작. **happy-path가 green이어도 self/cross/replay/state-change-after 음성 케이스를 안 태우면 이 클래스는 영원히 green** — 동일 불변식을 타 모듈 레퍼런스와 대조한다).
 - workflow: `agent(prompt, {model: 'sonnet', schema})`
 - 인터랙티브: Task로 `subagent_type: worker` spawn (worker.md가 Sonnet+effort 고정)
 - 어려운 추론이 필요한 단위만 `'opus'`로.

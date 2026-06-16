@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 검증 게이트 훅 4종의 행동 회귀 테스트 — 합성 git repo + 합성 transcript로 발화/침묵을 검사한다.
+# 검증 게이트 훅 4종 + SessionStart 업데이트 알림 훅의 행동 회귀 테스트 — 합성 git repo + 합성 transcript로 발화/침묵을 검사한다.
 # 훅 수정 후, 그리고 새 머신(Linux·macOS·Windows git-bash)에서 한 번 돌려 이식성을 확인한다.
 # 사용: scripts/test-hooks.sh [hooks-dir]   (기본: <repo>/plugins/ksi-harness/scripts)
 # 의존: bash·git·python3 (훅 자체와 동일). ruff는 없으면 해당 케이스 SKIP.
@@ -81,6 +81,27 @@ printf 'AWS_KEY=%s\n' "$AWSKEY" > "$T/.env.example"
 out="$(ss "$T/.env.example")"; [ -z "$out" ] && pass "secret-scan.sh — .env.example 제외 → silent" || failt "secret-scan.sh — 예시인데 발화"
 mkdir -p "$T/db/migrations"; printf 'DROP TABLE users;\n' > "$T/db/migrations/001.sql"
 case "$(ss "$T/db/migrations/001.sql")" in *additionalContext*) pass "secret-scan.sh — 파괴적 DDL → 경고" ;; *) failt "secret-scan.sh — DDL인데 침묵" ;; esac
+
+echo "== SessionStart 훅: update-check =="
+UCSENT="${TMPDIR:-/tmp}/claude-ksi-update-check.last"
+UCSRC="$T/ucsrc"; mkdir -p "$UCSRC/.claude-plugin"
+( cd "$UCSRC" && git init -q . && git config user.email t@t && git config user.name t \
+  && echo '{"name":"ksi-harness","version":"0.0.0"}' > .claude-plugin/plugin.json \
+  && git add -A && git commit -qm r && git tag v0.0.5 && git tag v0.2.0 ) >/dev/null 2>&1
+git clone -q "$UCSRC" "$T/ucroot" >/dev/null 2>&1
+ucver() { printf '{"name":"ksi-harness","version":"%s"}\n' "$1" > "$T/ucroot/.claude-plugin/plugin.json"; }
+ucrun() { rm -f "$UCSENT"; CLAUDE_PLUGIN_ROOT="$T/ucroot" bash "$HOOKS/update-check.sh" 2>/dev/null; }
+if [ -f "$T/ucroot/.claude-plugin/plugin.json" ]; then
+  # 주의: json.dumps가 한글을 \uXXXX로 이스케이프하므로 raw 한글이 아니라 ASCII 키(systemMessage)로 매칭한다.
+  ucver 0.1.0; case "$(ucrun)" in *systemMessage*) pass "update-check.sh — 뒤처짐 → 알림" ;; *) failt "update-check.sh — 뒤처짐인데 침묵" ;; esac
+  ucver 0.2.0; out="$(ucrun)"; [ -z "$out" ] && pass "update-check.sh — 동일 → silent" || failt "update-check.sh — 동일인데 발화"
+  ucver "shaXYZ"; out="$(ucrun)"; [ -z "$out" ] && pass "update-check.sh — 비-semver → silent" || failt "update-check.sh — 비-semver인데 발화"
+  git -C "$T/ucroot" remote set-url origin /nonexistent.git 2>/dev/null; ucver 0.1.0
+  out="$(ucrun)"; [ -z "$out" ] && pass "update-check.sh — 원격 불가 → graceful silent" || failt "update-check.sh — 오프라인인데 발화"
+  rm -f "$UCSENT"
+else
+  echo "SKIP  update-check (git clone 실패 — 환경)"
+fi
 
 echo
 [ $fail -eq 0 ] && echo "✅ 전체 통과" || echo "❌ 실패 있음"

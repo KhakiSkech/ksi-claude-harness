@@ -84,6 +84,7 @@ alias claude='claude --dangerously-skip-permissions --settings '\''{"ultracode":
 ## 업데이트 / 버전
 - 활발한 개발: `plugin.json`/`marketplace.json`의 `version`을 생략하면 git commit SHA가 버전이 된다.
 - 안정 배포: semantic versioning(`0.1.0` → bump). 마켓플레이스 `source`에 `ref`(tag/branch)로 stable/latest 채널 분리 가능.
+- **업데이트 알림 (SessionStart 훅, 0.2.0+):** `update-check.sh`가 세션 시작 시 원격 최신 릴리스 태그(`vX.Y.Z`)와 설치 버전을 비교해, 뒤처졌으면 *"업데이트 가능"* 한 줄을 알린다 — **알림-only(코드 자동변경 없음)**, 하루 1회·`git ls-remote` 4s timeout·오프라인이면 graceful silent. 적용은 사용자가 `/plugin marketplace update` → `/plugin update ksi-harness`로 직접 한다. **그래서 릴리스 때 반드시 태그를 푼다:** `git tag vX.Y.Z && git push origin vX.Y.Z`(태그가 없으면 알림이 비교할 기준이 없다). dangerous mode 하네스에서 원격 코드를 검토 없이 자동 pull·실행하는 건 공급망 위험이라 **의도적으로 자동적용을 하지 않는다**.
 
 ## 멀티머신 동기화 (한 줄)
 다른 머신에서 새 버전이 push되면, repo clone에서 한 줄로 받는다 — repo 최신화 + 플러그인 갱신 + 훅 회귀까지:

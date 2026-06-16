@@ -103,6 +103,7 @@ const keyOf = (f) => `${f.title}@@${f.where}`
 const seen = new Set()
 const confirmed = []
 const refuted = []
+const degraded = []
 
 const verifyOne = (f, round) =>
   reviewAgent(
@@ -126,8 +127,10 @@ const verifyOne = (f, round) =>
 
 const absorb = (f, unit) => {
   const v = f.verdict
-  if (v && v.verdict === 'refuted') refuted.push({ ...f, unit })
-  else confirmed.push({ ...f, unit, final_severity: (v && v.verdict === 'adjust' && v.corrected_severity) || f.severity })
+  // verify가 죽으면(rate-limit·에러로 verdict=null) 미검증을 confirmed로 흡수하지 않는다 — '가짜 검증완료'(false green) 방지.
+  if (!v) degraded.push({ ...f, unit })
+  else if (v.verdict === 'refuted') refuted.push({ ...f, unit })
+  else confirmed.push({ ...f, unit, final_severity: (v.verdict === 'adjust' && v.corrected_severity) || f.severity })
 }
 
 const coveredUnits = []
@@ -167,7 +170,7 @@ while (pending.length && round < maxRounds) {
 ## 완성도 critic — 빠진 게 뭔가
 지금까지 분석한 단위: ${coveredUnits.join(', ')}
 확정 findings 제목: ${confirmed.map((f) => f.title).join(' | ') || '(없음)'}
-안 본 단위·미검증 주장·안 돌린 렌즈를 재점검하라. 특히 멀티액터/금전/평판/권한 surface면 어뷰징·무결성 불변식(역할겸직·경제무결성·게이밍·시간축권한)이 음성 케이스(self/cross/replay/state-change-after)로 점검됐는지 확인하라 — 생성 능력은 있으니 이 과녁을 빠뜨리지 말 것. 새 finding은 missed_findings로(직접 확인한 것만 — 추측 금지),
+안 본 단위·미검증 주장·안 돌린 렌즈를 재점검하라. 특히 멀티액터/금전/평판/권한 surface면 어뷰징·무결성 불변식(역할겸직·경제무결성·게이밍·시간축권한)이 음성 케이스(self/cross/replay/state-change-after)로 점검됐는지 확인하라 — 생성 능력은 있으니 이 과녁을 빠뜨리지 말 것. 외부 의존(API·결제·소켓)·상태기계 surface면 운영조건(타임아웃·부분체결·에러코드·rate-limit·재연결·필터위반·부하)에서 깨지는지, 스테이징/테스트가 못 보는 환경분기가 있는지도 점검하라. 새 finding은 missed_findings로(직접 확인한 것만 — 추측 금지),
 추가 분석이 필요한 단위는 unexplored_units로(이미 본 단위 재탕 금지). 없으면 둘 다 빈 배열.`,
       `critic:r${round}`,
       `Round ${round}`,
@@ -200,6 +203,7 @@ return {
   counts: {
     confirmed: confirmed.length,
     refuted: refuted.length,
+    degraded: degraded.length,
     by_severity: {
       critical: confirmed.filter((f) => f.final_severity === 'critical').length,
       high: confirmed.filter((f) => f.final_severity === 'high').length,
@@ -209,4 +213,5 @@ return {
   },
   findings: confirmed,
   refuted,
+  degraded, // verify가 죽어 미검증으로 남은 finding — caller는 이걸 DEGRADED로 보고하고 낙관 결론을 보류한다.
 }

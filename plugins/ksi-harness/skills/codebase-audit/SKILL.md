@@ -29,7 +29,7 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 `scout`(쓰기 필요 시) 또는 빌트인 **Explore**(read-only, 이미 Haiku)로 각 단위의 파일 인벤토리·grep 인덱싱·진입점을 빠르고 싸게 수집.
 
 ## 3. 분석 fan-out — Sonnet tier
-단위별 워커가 병렬 분석. **diverse-lens**로: 정확성/버그 · 보안 · 성능 · 일관성/중복 · 설정-의도 정합 · 문서-코드 drift · **핵심 여정 실행성**(시드/테스트/픽스처가 파생·종단 상태를 직접 세팅해 실제 flow를 우회하는 '가짜 green' smell — 완료 플래그 직접 세팅, 집계/파생값 직접 적재 등. 데모는 차 있는데 실사용 동선은 막혀 있나) · **제품 정체성 SSOT 정합**(README·CLAUDE.md 도메인 불변식/제품명과 모순되는 표면이 있나 — 리네이밍·피벗 후 구 명칭·구 컴포넌트·구 분류 잔재가 누수돼 신·구가 한 화면에 공존하나) · **어뷰징·무결성 불변식**(보안=auth/IDOR/injection과 **분리** — '인증상 허용되나 비즈니스룰상 금지': 역할 겸직 self-review/self-finalize · 경제 무결성 환불≤수금·멱등 결제·서버권위 가격 · 게이밍 다중계정 혜택리셋·self-count · 시간축 권한 ban/만료 후 보호동작. **happy-path가 green이어도 self/cross/replay/state-change-after 음성 케이스를 안 태우면 이 클래스는 영원히 green** — 동일 불변식을 타 모듈 레퍼런스와 대조한다).
+단위별 워커가 병렬 분석. **diverse-lens**로: 정확성/버그 · 보안 · 성능 · 일관성/중복 · 설정-의도 정합 · 문서-코드 drift · **핵심 여정 실행성**(시드/테스트/픽스처가 파생·종단 상태를 직접 세팅해 실제 flow를 우회하는 '가짜 green' smell — 완료 플래그 직접 세팅, 집계/파생값 직접 적재 등. 데모는 차 있는데 실사용 동선은 막혀 있나) · **제품 정체성 SSOT 정합**(README·CLAUDE.md 도메인 불변식/제품명과 모순되는 표면이 있나 — 리네이밍·피벗 후 구 명칭·구 컴포넌트·구 분류 잔재가 누수돼 신·구가 한 화면에 공존하나) · **어뷰징·무결성 불변식**(보안=auth/IDOR/injection과 **분리** — '인증상 허용되나 비즈니스룰상 금지': 역할 겸직 self-review/self-finalize · 경제 무결성 환불≤수금·멱등 결제·서버권위 가격 · 게이밍 다중계정 혜택리셋·self-count · 시간축 권한 ban/만료 후 보호동작. **happy-path가 green이어도 self/cross/replay/state-change-after 음성 케이스를 안 태우면 이 클래스는 영원히 green** — 동일 불변식을 타 모듈 레퍼런스와 대조한다) · **운영조건/fault-injection**(정적 코드가 아니라 *런타임 실패 모드* — 외부 의존(API·결제·소켓·큐)·상태기계 surface면 타임아웃·부분체결·에러코드·rate-limit·재연결·필터/제약 위반·동시성·부하에서 어떻게 깨지나. **이 surface를 스테이징/테스트 환경이 구조적으로 관측 못 하는 환경분기가 있으면 'done'이 아니라 '이 환경까지 검증, 실환경 카나리 전엔 unknown'으로 표기** — '지어졌나·green인가'만으론 이 클래스가 통과 못 한다).
 - workflow: `agent(prompt, {model: 'sonnet', schema})`
 - 인터랙티브: Task로 `subagent_type: worker` spawn (worker.md가 Sonnet+effort 고정)
 - 어려운 추론이 필요한 단위만 `'opus'`로.
@@ -45,8 +45,8 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 - **critic 산출물을 그냥 채택하지 않는다** — critic이 낸 새 finding도 §4 adversarial verify를 한 번 더 통과시켜 살아남은 것만 채택(값싼 critic도 그럴듯한 거짓을 낸다 — verify 우회 금지). 1차 findings는 verify로 걸렀는데 critic 추가분만 무검증 통과하는 게 흔한 누락이다.
 - critic이 '안 본 단위'를 반환하고 round < 상한(2)이면 그 단위를 **다음 라운드의 분석 fan-out으로 재투입**. critic 무소득이거나 상한 도달이면 정지. (pipeline은 고정 깊이 단발이므로, 이 재투입이 없으면 critic은 루프가 아니라 terminal one-shot이 된다.)
 
-## 6. 종합
-severity로 정렬한 findings + 구체 권고. 반복 결함은 단위별 땜질이 아니라 **구조적 처방**(공유 모듈/규칙/SSOT).
+## 6. 종합 (무손실)
+severity로 정렬한 findings + 구체 권고. 반복 결함은 단위별 땜질이 아니라 **구조적 처방**(공유 모듈/규칙/SSOT). **무손실 규칙: P0/P1·자금경로·보안 raw finding은 종합 압축이 절대 묻지 못한다** — '대체로 production-grade' 같은 top-line이 그 아래 critical을 가리면 안 된다. 위임자(메인)는 종합 *요약문*이 아니라 **raw 차원별 리스트를 직접 읽고 보고**한다. verify/critic이 rate-limit·세션한도로 부분 실패하면 그 결과를 **DEGRADED(미검증)**로 표기하고 낙관 top-line을 보류한다(잘린 draft를 '완료'로 relay 금지).
 
 ## 원칙
 - **티어링(3-tier 워커 + 메인급):** 탐색=Explore/scout(`'haiku'`) · 분석·구현=worker(`'sonnet'`) · verify·완성도 critic=**reviewer**(`'opus'`·xhigh·read-only) · 모순 tiebreak/고위험 최종=메인급(미지정 inherit, 의도적으로만) · 판정·종합=메인(Fable이든 Opus든 무관). 모델은 alias로 지정 — 풀 ID 하드코딩 금지.

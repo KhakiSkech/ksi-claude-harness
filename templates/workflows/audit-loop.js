@@ -4,6 +4,14 @@ export const meta = {
   whenToUse: '병렬 감사가 필요할 때 매번 pipeline을 재작성하지 말고 units(키+프롬프트)와 dial만 args로 넘긴다.',
 }
 
+// ==== LOOP CONTRACT (SSOT — codebase-audit/ui-audit 스킬 산문은 의미를 재명세하지 말고 여기를 참조) ====
+//  survivor   = verdict ≠ 'refuted' 인 finding (verify 실패=error 는 confirmed 아님 → degraded 버킷).
+//  verify 트리거 = verifySeverities(기본 critical/high). 미트리거 = 'unverified'(정책 skip, 실패 아님).
+//  verify 실패(throw/rate-limit) = 'error' → degraded[]에 격리, counts에 confirmed로 세지 않음, return.degraded=true.
+//  정지       = critic 무소득 또는 round == maxRounds(기본 2 · 천장 4, dial). 남은 미탐색 단위 = units_deferred.
+//  tier       = analyze:sonnet(dial) · verify/critic:reviewer(opus·xhigh·read-only, 부재 시 opus 폴백).
+// ====
+
 // ---- args (dial) ----
 // units: [{key, prompt}]  필수 — 단위별 분석 지시(출력 지시는 불필요, 스키마가 강제).
 // context: 모든 에이전트 프롬프트 앞에 붙는 공통 맥락(제품·페르소나·경로·design-side spec). 강력 권장.
@@ -13,7 +21,7 @@ export const meta = {
 // verifyModel='opus' | criticModel='opus' — reviewerAgent=false일 때만 쓰는 폴백 모델.
 // maxRounds — critic 재투입 포함 상한: 기본 2, 천장 4(스킬 문서의 '상한 2'는 기본값 서술). verifySeverities=['critical','high'] — verify 트리거(dial).
 // critic=true — false면 critic 생략(작은 감사).
-// args가 JSON-encoded 문자열로 도착하는 호출 경로 방어
+// args가 JSON-encoded 문자열로 도착하는 호출 경로 방어(스모크 런에서 실측된 함정)
 let A = args || {}
 if (typeof A === 'string') {
   try { A = JSON.parse(A) } catch (e) { return { error: 'args가 문자열인데 JSON 파싱 실패 — 객체로 넘기거나 유효한 JSON으로' } }
@@ -103,7 +111,7 @@ const keyOf = (f) => `${f.title}@@${f.where}`
 const seen = new Set()
 const confirmed = []
 const refuted = []
-const degraded = []
+const degraded = [] // verify가 throw/실패한 finding — confirmed로 세지 않는다(가짜 green 방지 · LOOP CONTRACT)
 
 const verifyOne = (f, round) =>
   reviewAgent(
@@ -123,14 +131,17 @@ const verifyOne = (f, round) =>
     verifyModel,
   )
     .then((v) => ({ ...f, verdict: v }))
-    .catch(() => ({ ...f, verdict: null }))
+    .catch(() => {
+      log(`  ⚠ verify 실패: "${String(f.title).slice(0, 36)}" — rate-limit/세션한도 추정 → DEGRADED(미검증, confirmed 아님)`)
+      return { ...f, verdict: { verdict: 'error', corrected_severity: null, note: 'verify 호출 실패(throw) — 미검증' } }
+    })
 
+// LOOP CONTRACT: refuted→버림, verify 실패(error/null)→degraded, 그 외(confirmed/adjust/unverified)→confirmed
 const absorb = (f, unit) => {
   const v = f.verdict
-  // verify가 죽으면(rate-limit·에러로 verdict=null) 미검증을 confirmed로 흡수하지 않는다 — '가짜 검증완료'(false green) 방지.
-  if (!v) degraded.push({ ...f, unit })
-  else if (v.verdict === 'refuted') refuted.push({ ...f, unit })
-  else confirmed.push({ ...f, unit, final_severity: (v.verdict === 'adjust' && v.corrected_severity) || f.severity })
+  if (v && v.verdict === 'refuted') refuted.push({ ...f, unit })
+  else if (!v || v.verdict === 'error') degraded.push({ ...f, unit, final_severity: f.severity })
+  else confirmed.push({ ...f, unit, final_severity: (v.verdict === 'adjust' && v.corrected_severity) || f.severity, verify_state: v.verdict })
 }
 
 const coveredUnits = []
@@ -170,7 +181,7 @@ while (pending.length && round < maxRounds) {
 ## 완성도 critic — 빠진 게 뭔가
 지금까지 분석한 단위: ${coveredUnits.join(', ')}
 확정 findings 제목: ${confirmed.map((f) => f.title).join(' | ') || '(없음)'}
-안 본 단위·미검증 주장·안 돌린 렌즈를 재점검하라. 특히 멀티액터/금전/평판/권한 surface면 어뷰징·무결성 불변식(역할겸직·경제무결성·게이밍·시간축권한)이 음성 케이스(self/cross/replay/state-change-after)로 점검됐는지 확인하라 — 생성 능력은 있으니 이 과녁을 빠뜨리지 말 것. 외부 의존(API·결제·소켓)·상태기계 surface면 운영조건(타임아웃·부분체결·에러코드·rate-limit·재연결·필터위반·부하)에서 깨지는지, 스테이징/테스트가 못 보는 환경분기가 있는지도 점검하라. 새 finding은 missed_findings로(직접 확인한 것만 — 추측 금지),
+안 본 단위·미검증 주장·안 돌린 렌즈를 재점검하라. 새 finding은 missed_findings로(직접 확인한 것만 — 추측 금지),
 추가 분석이 필요한 단위는 unexplored_units로(이미 본 단위 재탕 금지). 없으면 둘 다 빈 배열.`,
       `critic:r${round}`,
       `Round ${round}`,
@@ -196,14 +207,27 @@ while (pending.length && round < maxRounds) {
 
 const rank = { critical: 0, high: 1, medium: 2, low: 3 }
 confirmed.sort((a, b) => (rank[a.final_severity] ?? 9) - (rank[b.final_severity] ?? 9))
+degraded.sort((a, b) => (rank[a.final_severity] ?? 9) - (rank[b.final_severity] ?? 9))
+
+// LOOP CONTRACT: degraded(verify 실패)가 1건이라도 있으면 결과는 DEGRADED — 위임자는 낙관 top-line을 보류한다.
+if (degraded.length) log(`⚠ DEGRADED: ${degraded.length}건이 verify 실패로 미검증 — confirmed로 세지 않음. 낙관 결론 보류 권장.`)
+if (pending.length) log(`⚠ 미탐색 단위 ${pending.length}개 남음(maxRounds 도달) → units_deferred`)
 
 return {
   rounds: round,
+  degraded: degraded.length > 0, // true면 verify 부분실패 — 낙관 결론 relay 금지(green≠작동)
+  incomplete_coverage: pending.length > 0, // true면 critic이 반환한 단위를 maxRounds로 다 못 봄
   units_covered: coveredUnits,
+  units_deferred: pending.map((u) => u.key),
   counts: {
     confirmed: confirmed.length,
     refuted: refuted.length,
-    degraded: degraded.length,
+    verify_failed: degraded.length,
+    by_verdict: {
+      verified: confirmed.filter((f) => f.verify_state === 'confirmed').length,
+      adjusted: confirmed.filter((f) => f.verify_state === 'adjust').length,
+      unverified_skipped: confirmed.filter((f) => f.verify_state === 'unverified').length,
+    },
     by_severity: {
       critical: confirmed.filter((f) => f.final_severity === 'critical').length,
       high: confirmed.filter((f) => f.final_severity === 'high').length,
@@ -212,6 +236,6 @@ return {
     },
   },
   findings: confirmed,
+  degraded_findings: degraded, // verify 실패로 미검증 — 별도 추적(confirmed와 분리)
   refuted,
-  degraded, // verify가 죽어 미검증으로 남은 finding — caller는 이걸 DEGRADED로 보고하고 낙관 결론을 보류한다.
 }

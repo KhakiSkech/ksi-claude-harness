@@ -9,10 +9,11 @@ when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 �
 전제: **코드가 그럴듯해도 렌더에서 실패한다.** `overflow-auto`가 있어도 한글이 세로로 쪼개지고, 타입이 맞고 e2e가 초록불이어도 모바일 표는 으스러진다. 읽어서는 안 보이고 **봐야만 보인다.** 그래서 반드시 누군가는 스크린샷을 Read로 본다 — fan-out 하되 시각 확인을 프롬프트에 기본 탑재한다.
 
 ## 0. 재사용 루프 골격 (매번 0에서 재조립 금지 — codebase-audit §0.5의 픽셀판)
-감사·adversarial verify·완성도 critic 루프는 `audit-loop` saved workflow를 재사용한다(repo `templates/workflows/audit-loop.js` → `~/.claude/workflows/` 복사). codebase-audit과 **같은 골격**을 픽셀 감사에 쓴다 — **캡처(§2)는 골격 밖에서 먼저** 하고, units에 페이지/차원별 프롬프트 + 스크린샷 경로를 넘긴다.
-`Workflow({scriptPath: '~/.claude/workflows/audit-loop.js', args: {units:[{key,prompt}], context, verifySeverities, maxRounds, analyzeModel, verifyModel, batchSize}})`
-- **기본값(스킬에 박혀 있음 — 스크립트는 dial만 바꾼다):** verify 트리거 = critical/high(dial `verifySeverities`로 확장) · verify·critic tier = **`reviewer`**(opus·xhigh·read-only, **부재 시 `model:opus`로 graceful 폴백** — 무검증 통과 금지) · 정지 = critic 무소득 또는 상한(`maxRounds` 기본 2·천장 4) · survivor = `verdict≠'refuted'` · analyze tier = sonnet(dial `analyzeModel`) · 페이지가 많으면 `batchSize`로 동시 캡처/감사 단위를 끊어 rate-limit 회피.
-- **context에 design-side spec을 반드시 넣는다** — 페르소나·핵심 동선 step-budget·상태 인벤토리·마이크로카피 SSOT·접근성 예산. 기준 없는 시각 감사는 '안 깨졌나'만 잰다(§1·전역 CLAUDE.md 작업방식과 동일 원칙).
+감사·adversarial verify·완성도 critic 루프는 `~/.claude/workflows/audit-loop.js`(saved workflow)를 재사용 — codebase-audit과 **같은 골격**을 픽셀 감사에 쓴다. **캡처(§2)는 골격 밖에서 먼저** 하고, units에 페이지/차원별 프롬프트 + 스크린샷 경로를 넘긴다.
+`Workflow({scriptPath: '~/.claude/workflows/audit-loop.js', args: {units:[{key,prompt}], context, verifySeverities, maxRounds, analyzeModel}})`
+- **루프 의미론(트리거·survivor·정지·degraded·폴백)의 SSOT = audit-loop.js 상단 LOOP CONTRACT 주석** — 여기서 재명세하지 않는다(산문↔코드 drift 차단). dial: verifySeverities(기본 critical/high)·maxRounds(기본 2·천장 4)·analyzeModel(기본 sonnet).
+- **티어링(픽셀판):** 캡처·인벤토리=haiku(scout/Explore) · 시각 감사=`model:'sonnet'` · **발견성·역할게이팅·흐름단절 등 맥락추론 렌즈=`model:'opus'`** · verify/critic=reviewer(LOOP CONTRACT) · 종합=메인. 모델 배치 일반 규칙은 CLAUDE.md 참조.
+- **context에 design-side spec을 반드시 넣는다** — UX목표 5축(페르소나·동선 step-budget·상태 인벤토리·마이크로카피 SSOT·접근성 예산 = CLAUDE.md 작업방식 SSOT). 기준 없는 시각 감사는 '안 깨졌나'만 잰다.
 
 ## 절차
 
@@ -20,8 +21,8 @@ when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 �
    - 페이지/라우트 목록: 변경된 화면 + 핵심 흐름(목록·상세·폼·대시보드·빈상태).
    - 뷰포트 set: **mobile 390px** (필수), tablet 768, desktop 1440. 모바일을 빼지 않는다.
    - 데이터: 풍부한 mock 말고 **빈 / 희박(1~2행) / 아주 긴 한글 이름 / 다수 행**을 섞은 픽스처로.
-   - **콜드스타트 시나리오:** 빈 조직 + **각 역할로 로그인한 첫 화면**. 픽셀 한 장이 아니라 **동선**을 캡처 — "핵심 결과물까지 nav에서 몇 클릭에 도달하나, 못 찾나, 클릭하면 리다이렉트되는 죽은 메뉴는 없나".
-   - **측정 기준(design-side spec)을 먼저 확보:** 이 화면의 의도된 UX 목표 — 페르소나·핵심 동선 단계 예산·필수 상태 인벤토리·마이크로카피 SSOT·접근성 예산(전역 CLAUDE.md 작업방식). 없으면 PRD/`docs/`에서 추출하거나 사용자에게 1줄 확인. **시각 감사는 '안 깨졌나'가 아니라 '이 목표 대비 gap이 있나'를 본다** — 기준 없는 감사는 '잘 구성됐나'만 통과시킨다.
+   - **콜드스타트 시나리오:** 빈 조직 + **각 역할로 로그인한 첫 화면**. 픽셀 한 장이 아니라 **동선**을 캡처 — "핵심 산출물(리포트·결과)까지 nav에서 몇 클릭에 도달하나, 못 찾나, 클릭하면 리다이렉트되는 죽은 메뉴는 없나".
+   - **측정 기준(design-side spec)을 먼저 확보:** §0의 UX목표 5축(=CLAUDE.md SSOT). 없으면 PRD/`docs/`에서 추출하거나 사용자에게 1줄 확인. **시각 감사는 '안 깨졌나'가 아니라 '이 목표 대비 gap이 있나'를 본다** — 기준 없는 감사는 '잘 구성됐나'만 통과시킨다.
 
 2. **캡처** — `/run` 또는 `/verify`로 앱 기동 → Playwright(또는 playwright-mcp)로 페이지×뷰포트 스크린샷을 파일로 저장. 기동 불가면 사용자에게 실행 방법을 1줄로 묻는다.
 
@@ -31,20 +32,20 @@ when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 �
    - 터치 타겟 < 44px, 노안 고려 글자 크기
    - 대비(WCAG AA), 색 의존 정보
    - 빈 / 희박 / 초과 상태에서의 깨짐 (특히 차트·표)
-   - **발견성/콜드스타트:** 핵심 결과물이 nav에서 도달 가능한가 · 신규/각 역할이 길을 잃나 · 클릭하면 리다이렉트되는 죽은 메뉴는 없나 · 기능이 '만든 사람 머릿속' 위치(예: 결과물이 관리 메뉴 깊숙이)에 묻혀 있나. (화면 안 깨졌어도 도달 못 하면 결함)
-   - **흐름 마찰(시각 너머):** 핵심 잡(예: 생성→검토→완료→결과물)을 몇 단계·클릭에 끝내나 · 중복 경로 · 숨은 1차 CTA · 되돌리기 없는 위험 동작. **단계 예산 초과는 화면이 안 깨졌어도 결함**(design-side spec의 step-budget 대비).
-   - **에러·복구·엣지('green≠작동'의 UI판):** parse 실패·필수값 누락·권한 차단·완료 잠금에서 사용자가 막히지 않고 빠져나오나 · 에러 메시지가 raw 키/영어/HTTP코드가 아니라 사람 말인가 · 미리 완료 처리된 픽스처가 아니라 실제 상태(빈/생성중/실패)가 렌더되나.
-   - **용어 SSOT·마이크로카피:** 같은 개념이 화면마다 다른 라벨로 새지 않나 — **라벨 SSOT 파일(labels.ts 등)을 스크린샷과 함께 Read해 실제 표기와 대조** · 내부코드(group_code·reason_code 등)·영어 잔존 노출 · 빈 상태 문구가 다음 행동을 안내하나. (실전에서 '같은 대상에 모순된 분류 라벨 동시 표기'·'영어 raw 에러 노출' 같은 최고 영향 결함이 이 렌즈에서 나온다.)
+   - **발견성/콜드스타트:** 핵심 산출물(리포트·결과)이 nav에서 도달 가능한가 · 신규/각 역할이 길을 잃나 · 클릭하면 리다이렉트되는 죽은 메뉴는 없나 · 기능이 '만든 사람 머릿속' 위치(예: 산출물이 관리 메뉴 깊숙이)에 묻혀 있나. (화면 안 깨졌어도 도달 못 하면 결함)
+   - **흐름 마찰(시각 너머):** 핵심 잡(생성→검수→최종화→산출물)을 몇 단계·클릭에 끝내나 · 중복 경로 · 숨은 1차 CTA · 되돌리기 없는 위험 동작. **단계 예산 초과는 화면이 안 깨졌어도 결함**(design-side spec의 step-budget 대비).
+   - **에러·복구·엣지('green≠작동'의 UI판):** parse 실패·필수값 누락·권한 차단·finalize 잠금에서 사용자가 막히지 않고 빠져나오나 · 에러 메시지가 raw 키/영어/HTTP코드가 아니라 사람 말인가 · 미리 최종화된 픽스처가 아니라 실제 상태(빈/생성중/실패)가 렌더되나.
+   - **용어 SSOT·마이크로카피:** 같은 개념이 화면마다 다른 라벨로 새지 않나 — **라벨 SSOT 파일(labels.ts 등)을 스크린샷과 함께 Read해 실제 표기와 대조** · 내부코드(group_code·reason_code 등)·영어 잔존 노출 · 빈 상태 문구가 다음 행동을 안내하나. (예: 이중 분류 SSOT 모순·영어 raw 에러가 이 렌즈에서 드러난다.)
    - 정렬·간격 드리프트, 이모지 vs 아이콘 혼용 등 일관성
-   - 모델 티어링(3-tier 워커 + 메인급): 캡처·인벤토리 잡일=`'haiku'`(scout/Explore) · 스크린샷 시각 감사=`agent({model: 'sonnet'})`(체크리스트 대조형 판독) · 발견성·역할게이팅·흐름단절 등 **맥락 추론 차원=`'opus'`** · adversarial 검증·완성도 critic=**`reviewer`**(`agentType:'reviewer'` = opus·xhigh·read-only) · 검증 모순 시 tiebreak=메인급(미지정 inherit, 의도적으로만) · 종합·판정=메인. **verify·종합 호출도 명시 필수 — model 미지정 inherit는 메인급 tiebreak 슬롯에만**(세션 main이 Fable이면 미지정 verify가 의도 없이 Fable로 샌다). 그 외 미지정 agent()는 전부 메인 inherit이므로 alias로 명시. **effort는 inline `agent()`에 못 준다(세션 inherit) — verify를 reviewer로 spawn하면 xhigh·read-only가 frontmatter로 고정된다(effort 우회).**
+   - *(시각 렌즈 외 맥락추론 렌즈 — 발견성·흐름마찰·에러복구 — 는 §0 티어링대로 opus로 라우팅)*
 
 4. **adversarial 검증 + 완성도 critic → 재투입** — 각 critical/high finding(기본 — dial로 확장)을 *다른* 에이전트(**`reviewer` tier** — opus·xhigh·read-only)가 같은 스크린샷으로 반증 시도(거짓양성·과장 제거). 살아남은 것만 채택. 인터랙티브 경로는 Task로 `subagent_type: reviewer` spawn.
    - **완성도 critic(reviewer):** 안 본 페이지·뷰포트·역할·빈/초과 상태가 남았나 1패스 재점검. **critic이 낸 새 결함도 위 adversarial verify를 한 번 더 통과시켜 채택**(critic 산출물 무검증 통과 금지), 남은 게 있고 상한(2패스) 내면 재캡처·재감사. codebase-audit §5와 대칭의 수렴 루프 — ui-audit이 선형이라 빠졌던 단계.
-   - **실행형 골격:** 감사·verify·critic 루프는 `audit-loop` saved workflow 재사용(repo `templates/workflows/audit-loop.js` → `~/.claude/workflows/` 복사; units=페이지/차원별 프롬프트+스크린샷 경로, context=design-side spec+제품 맥락). 캡처(§2)는 골격 밖에서 먼저.
+   - **실행형 골격:** 감사·verify·critic 루프는 `~/.claude/workflows/audit-loop.js` 재사용(units=페이지/차원별 프롬프트+스크린샷 경로, context=design-side spec+제품 맥락). 캡처(§2)는 골격 밖에서 먼저.
 
 5. **구조적 처방** — 여러 페이지에 반복되는 결함은 페이지별 땜질이 아니라 **공유 프리미티브로 한 번에**: `PageHeader` / `ResponsiveTable`(모바일 reflow) / `EmptyState` / 라벨 맵(SSOT). 일관성을 노력이 아니라 구조로 강제.
 
-6. **우선순위 findings + (선택) 회귀 baseline** — severity로 정렬해 보고. 수정 후 재캡처로 회귀 확인하고, 핵심 화면은 baseline 스크린샷을 저장해 다음 diff의 기준으로 남긴다.
+6. **우선순위 findings + (선택) 회귀 baseline** — severity로 정렬해 보고. **무손실/DEGRADED(codebase-audit §6과 대칭): critical/high 시각 결함은 종합 요약이 묻지 못한다 · verify/critic이 부분 실패하면 audit-loop이 `degraded:true`를 반환 — 그 플래그가 서면 낙관 결론('시각적으로 멀쩡')을 보류한다(green≠작동의 UI판).** 수정 후 재캡처로 회귀 확인하고, 핵심 화면은 baseline 스크린샷을 저장해 다음 diff의 기준으로 남긴다.
 
 ## 원칙
 - **모바일을 빼지 않는다.** 결함의 대부분은 390px에서 처음 보인다.

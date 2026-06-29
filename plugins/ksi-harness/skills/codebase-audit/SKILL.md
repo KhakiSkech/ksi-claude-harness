@@ -7,20 +7,18 @@ when_to_use: substantive한 코드 감사·병렬 분석이 필요할 때 — �
 # Codebase Audit — 병렬 감사 → adversarial 검증 → 종합
 
 ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한다. 핵심 두 원칙:
-**적재적소 티어링**(탐색=haiku · 분석/구현=sonnet · verify=opus · 모순 tiebreak/고위험 최종=메인급)과 **adversarial 검증**(값싼 워커는 그럴듯한 거짓을 만든다 — 반드시 반증으로 거른다. 값싼 tier가 그럴듯한 거짓을 내는 건 실전에서 반복 적발되는 실패 모드다).
+**적재적소 티어링**(탐색=haiku · 분석/구현=sonnet · verify=opus · 모순 tiebreak/고위험 최종=메인급)과 **adversarial 검증**(값싼 워커는 그럴듯한 거짓을 만든다 — 반드시 반증으로 거른다. 검증 우회 시 가짜 green이 통과한다).
 
 ## 0. 스코프 dial (먼저 — ultracode는 비제약이 기본이라 의도적으로 줄인다)
 - 작은 substantive: 워커 1개 + 검증 1패스.
 - 중간: 모듈 N개 = 워커 N개, adversarial 1패스.
-- 큰 감사: fan-out + adversarial(새 finding 마를 때까지, **상한 2패스**) + 완성도 critic. **확장 옵션:** critic이 미탐색 단위를 반환하면 상한 내에서 다음 라운드 analyze fan-out으로 자동 편입(§5 재투입 루프) — 고정 분해로 안 본 표면이 남을 때.
+- 큰 감사: fan-out + adversarial(새 finding 마를 때까지, **기본 2패스·천장 4** = maxRounds dial) + 완성도 critic. **확장 옵션:** critic이 미탐색 단위를 반환하면 상한 내에서 다음 라운드 analyze fan-out으로 자동 편입(§5 재투입 루프) — 고정 분해로 안 본 표면이 남을 때.
 - 단일 파일·1~2줄 변경엔 이 스킬 금지 — 직접 또는 worker 1개(코드 수정에 scout/Haiku 금지).
 
 ## 0.5 재사용 루프 골격 (매번 0에서 재조립 금지 — 의미를 못박는다)
-`pipeline(units, analyze, verify)`는 **고정 깊이 단발**(analyze 1패스 + verify 1패스)이다. 완성도가 필요한 큰 감사는 §5의 critic→verify→재투입 루프를 얹어 수렴시킨다. 스크립트가 dial만 바꾸도록 **기본값을 박는다**:
-- verify 트리거 = critical/high(P1/P2) 기본, dial로 전체 확장 · survivor = `verdict≠'refuted' && corrected≠'none'` · 정지 = critic 무소득 또는 상한 라운드(기본 2, dial로 최대 4).
-- 한 줄 의사코드: `round R: pipeline(pending, analyze, verify) → survivors; new = verify(critic(survivors)); new가 있고 R<2면 다음 round의 pending=new, 아니면 정지.`
-이 기본값을 스킬이 들고 있으면 트리거·survivor·정지 기준이 스크립트마다 즉흥이던 문제가 봉합되어 **세션 간 재현성·비교가능성**이 생긴다.
-**실행형 골격(권장):** repo의 `templates/workflows/audit-loop.js`를 `~/.claude/workflows/`(또는 프로젝트 `.claude/workflows/`)에 복사하면 위 루프가 saved workflow로 등록된다 — `units: [{key, prompt}]`와 dial(context·maxRounds·verifySeverities·analyzeModel·verifyModel)만 args로 넘겨 호출. 없으면 위 의사코드대로 author.
+`pipeline(units, analyze, verify)`는 **고정 깊이 단발**(analyze 1패스 + verify 1패스)이다. 완성도가 필요한 큰 감사는 §5의 critic→verify→재투입 루프를 얹어 수렴시킨다.
+**루프 의미론(트리거·survivor·정지·degraded·천장)의 SSOT = `~/.claude/workflows/audit-loop.js` 상단 LOOP CONTRACT 주석.** 여기서 재명세하지 않는다(산문↔코드 drift 차단) — 스킬은 dial만 넘긴다: `verifySeverities`(기본 critical/high)·`maxRounds`(기본 2·천장 4)·`analyzeModel`.
+**canonical 경로 = audit-loop.js workflow.** `Workflow({scriptPath: '~/.claude/workflows/audit-loop.js', args: {units: [{key, prompt}], context, maxRounds, verifySeverities, analyzeModel}})`로 호출. **§1–6은 그 워크플로가 내부 수행하는 spec이자, 워크플로 없이 인터랙티브로 돌릴 때의 fallback playbook**이다(파일 부재 시 LOOP CONTRACT대로 author).
 
 ## 1. 분해
 대상을 독립 단위로 나눈다(모듈/레포/레이어/관심사). 각 단위 = 한 워커의 몫.
@@ -29,7 +27,12 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 `scout`(쓰기 필요 시) 또는 빌트인 **Explore**(read-only, 이미 Haiku)로 각 단위의 파일 인벤토리·grep 인덱싱·진입점을 빠르고 싸게 수집.
 
 ## 3. 분석 fan-out — Sonnet tier
-단위별 워커가 병렬 분석. **diverse-lens**로: 정확성/버그 · 보안 · 성능 · 일관성/중복 · 설정-의도 정합 · 문서-코드 drift · **핵심 여정 실행성**(시드/테스트/픽스처가 파생·종단 상태를 직접 세팅해 실제 flow를 우회하는 '가짜 green' smell — 완료 플래그 직접 세팅, 집계/파생값 직접 적재 등. 데모는 차 있는데 실사용 동선은 막혀 있나) · **제품 정체성 SSOT 정합**(README·CLAUDE.md 도메인 불변식/제품명과 모순되는 표면이 있나 — 리네이밍·피벗 후 구 명칭·구 컴포넌트·구 분류 잔재가 누수돼 신·구가 한 화면에 공존하나) · **어뷰징·무결성 불변식**(보안=auth/IDOR/injection과 **분리** — '인증상 허용되나 비즈니스룰상 금지': 역할 겸직 self-review/self-finalize · 경제 무결성 환불≤수금·멱등 결제·서버권위 가격 · 게이밍 다중계정 혜택리셋·self-count · 시간축 권한 ban/만료 후 보호동작. **happy-path가 green이어도 self/cross/replay/state-change-after 음성 케이스를 안 태우면 이 클래스는 영원히 green** — 동일 불변식을 타 모듈 레퍼런스와 대조한다) · **운영조건/fault-injection**(정적 코드가 아니라 *런타임 실패 모드* — 외부 의존(API·결제·소켓·큐)·상태기계 surface면 타임아웃·부분체결·에러코드·rate-limit·재연결·필터/제약 위반·동시성·부하에서 어떻게 깨지나. **이 surface를 스테이징/테스트 환경이 구조적으로 관측 못 하는 환경분기가 있으면 'done'이 아니라 '이 환경까지 검증, 실환경 카나리 전엔 unknown'으로 표기** — '지어졌나·green인가'만으론 이 클래스가 통과 못 한다).
+단위별 워커가 병렬 분석. **diverse-lens** — 각 렌즈를 한 줄씩(압축해 한 문단에 욱여넣으면 context 압박 시 렌즈가 silent drop된다):
+- 정확성/버그 · 보안 · 성능 · 일관성/중복 · 설정-의도 정합 · 문서-코드 drift
+- **핵심 여정 실행성** — 시드/픽스처가 파생·종단 상태를 직접 세팅해 실제 flow를 우회하는 '가짜 green' smell(`status=finalized` 주입·점수 직접 적재). 데모는 차 있는데 실사용 동선은 막혀 있나.
+- **제품 정체성 SSOT 정합** — README·CLAUDE.md 도메인 불변식/제품명과 모순되는 표면(피벗·리네이밍 후 구 브랜드·렌더러·분류 잔재 누수).
+- **어뷰징·무결성 불변식** *(맥락추론 — `model:'opus'` 라우팅)* — 보안(auth/IDOR/injection)과 **분리**: '인증상 허용되나 비즈니스룰상 금지'. **4 어뷰징클래스(역할겸직·경제무결성·게이밍·시간축권한)·음성 케이스(self/cross/replay/state-change-after) = CLAUDE.md 'green≠금지' SSOT 참조.** happy-path가 green이어도 음성 케이스 안 태우면 이 클래스는 영원히 green — 동일 불변식을 타 모듈 레퍼런스와 대조.
+- **운영조건/fault-injection** *(맥락추론 — `model:'opus'` 라우팅)* — 정적 코드가 아니라 런타임 실패 모드: 외부의존(거래소·결제·소켓·큐)·상태기계면 타임아웃·부분체결·에러코드·rate-limit·재연결·동시성에서 어떻게 깨지나. **스테이징/testnet이 구조적으로 못 보는 환경분기가 있으면 'done'이 아니라 '실환경 카나리 전 unknown'으로 표기.**
 - workflow: `agent(prompt, {model: 'sonnet', schema})`
 - 인터랙티브: Task로 `subagent_type: worker` spawn (worker.md가 Sonnet+effort 고정)
 - 어려운 추론이 필요한 단위만 `'opus'`로.
@@ -37,16 +40,15 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 ## 4. adversarial 검증 — opus tier (생략 금지)
 각 critical/high finding(기본 — dial로 medium 이하 확장)을 **다른 에이전트가 반증 시도** — 실제 파일/근거를 다시 열어 거짓양성·과장·지어낸 명령/경로를 거른다. 살아남은 것만 채택. 확실치 않으면 보수적으로 의심. (§0.5 verify 트리거와 동일 기준 — 절마다 다르게 읽히면 안 된다.)
 - 검증 tier = **`reviewer`**(Opus xhigh, read-only — Edit/Write 없어 "검증하다 슬쩍 고치기" 구조적 차단). workflow: `agent(\`반증하라: ${finding}\`, {agentType: 'reviewer', schema: VERDICT})` (`{model:'opus'}`도 동작하나 reviewer면 effort·read-only가 frontmatter로 고정). 인터랙티브: Task로 `subagent_type: reviewer` spawn.
-- **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·비가역 데이터 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐.
-- **1M 컨텍스트는 비용이 아니라 용량 결정**(opus/메인 1M 세션이면 자동 부착, 가격 프리미엄 없음): 단일 finding verify엔 과프로비저닝이나 무해, **cross-finding critic·전모듈 종합**처럼 많은 근거를 동시에 들어야 하는 단계엔 정당.
+- **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·자금 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐.
 
 ## 5. 완성도 critic → verify 재투입 (수렴 루프, opus tier)
 별도 렌즈로 "빠진 게 뭔가 — 안 본 모듈·미검증 주장·미확인 가정·안 돌린 렌즈"를 재점검. critic·verify 모두 **`reviewer` tier**(§4) — 둘은 같은 opus read-only 검증 에이전트의 두 모드(반증 vs 완성도)일 뿐 별도 에이전트가 아니다.
 - **critic 산출물을 그냥 채택하지 않는다** — critic이 낸 새 finding도 §4 adversarial verify를 한 번 더 통과시켜 살아남은 것만 채택(값싼 critic도 그럴듯한 거짓을 낸다 — verify 우회 금지). 1차 findings는 verify로 걸렀는데 critic 추가분만 무검증 통과하는 게 흔한 누락이다.
-- critic이 '안 본 단위'를 반환하고 round < 상한(2)이면 그 단위를 **다음 라운드의 분석 fan-out으로 재투입**. critic 무소득이거나 상한 도달이면 정지. (pipeline은 고정 깊이 단발이므로, 이 재투입이 없으면 critic은 루프가 아니라 terminal one-shot이 된다.)
+- critic이 '안 본 단위'를 반환하고 round < maxRounds(기본 2)면 그 단위를 **다음 라운드의 분석 fan-out으로 재투입**. critic 무소득이거나 상한 도달이면 정지(남은 단위는 audit-loop이 units_deferred로 보고). (pipeline은 고정 깊이 단발이므로, 이 재투입이 없으면 critic은 루프가 아니라 terminal one-shot이 된다.)
 
 ## 6. 종합 (무손실)
-severity로 정렬한 findings + 구체 권고. 반복 결함은 단위별 땜질이 아니라 **구조적 처방**(공유 모듈/규칙/SSOT). **무손실 규칙: P0/P1·자금경로·보안 raw finding은 종합 압축이 절대 묻지 못한다** — '대체로 production-grade' 같은 top-line이 그 아래 critical을 가리면 안 된다. 위임자(메인)는 종합 *요약문*이 아니라 **raw 차원별 리스트를 직접 읽고 보고**한다. verify/critic이 rate-limit·세션한도로 부분 실패하면 그 결과를 **DEGRADED(미검증)**로 표기하고 낙관 top-line을 보류한다(잘린 draft를 '완료'로 relay 금지).
+severity로 정렬한 findings + 구체 권고. 반복 결함은 단위별 땜질이 아니라 **구조적 처방**(공유 모듈/규칙/SSOT). **무손실 규칙: critical/high·자금경로·보안 raw finding은 종합 압축이 절대 묻지 못한다** — '대체로 production-grade' 같은 top-line이 그 아래 critical을 가리면 안 된다. 위임자(메인)는 종합 *요약문*이 아니라 **raw 차원별 리스트를 직접 읽고 보고**한다. verify/critic이 rate-limit·세션한도로 부분 실패하면 그 결과를 **DEGRADED(미검증)**로 표기하고 낙관 top-line을 보류한다(잘린 draft를 '완료'로 relay 금지).
 
 ## 원칙
 - **티어링(3-tier 워커 + 메인급):** 탐색=Explore/scout(`'haiku'`) · 분석·구현=worker(`'sonnet'`) · verify·완성도 critic=**reviewer**(`'opus'`·xhigh·read-only) · 모순 tiebreak/고위험 최종=메인급(미지정 inherit, 의도적으로만) · 판정·종합=메인(Fable이든 Opus든 무관). 모델은 alias로 지정 — 풀 ID 하드코딩 금지.

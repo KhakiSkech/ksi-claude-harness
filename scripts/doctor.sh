@@ -37,6 +37,7 @@ chk 필수 claude  "Claude Code CLI — 플러그인 설치/갱신" "docs.anthro
 echo
 echo "-- 권장 (없으면 해당 기능이 '조용히' 빠짐)"
 chk 권장 ruff    "lint 훅 — 없으면 .py 저장 시 점검이 silent skip" "pipx install ruff  또는  pip install --user ruff  (PATH에 ~/.local/bin)"
+chk 권장 pip-audit "SCA 훅 — 없으면 requirements/lock 변경 시 의존성 취약점 점검이 '미검증'으로 표기됨" "pipx install pip-audit  또는  pip install --user pip-audit"
 chk 권장 node    "ui-audit 캡처(Playwright 실행 기반) — UI 캡처 안 하는 머신엔 불필요" "$PM nodejs  (또는 nvm)"
 if command -v npx >/dev/null 2>&1 && npx --no-install playwright --version >/dev/null 2>&1; then
   printf '  ✓ %-9s %s\n' playwright "ui-audit 스크린샷 캡처"

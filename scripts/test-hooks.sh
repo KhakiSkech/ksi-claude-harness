@@ -103,6 +103,30 @@ else
   echo "SKIP  update-check (git clone 실패 — 환경)"
 fi
 
+echo "== PostToolUse 훅: sca-check =="
+scaclean() { rm -f "${TMPDIR:-/tmp}"/claude-sca-*.last; }   # 파일별 dedup sentinel 초기화
+sca() { printf '{"tool_input":{"file_path":"%s"}}' "$1" | bash "$HOOKS/sca-check.sh"; }
+scaclean; printf 'x = 1\n' > "$T/notdep.py"
+out="$(sca "$T/notdep.py")"; [ -z "$out" ] && pass "sca-check.sh — 비-의존성 파일 → silent" || failt "sca-check.sh — 비-의존성인데 발화"
+scaclean; printf 'requests==2.0.0\n' > "$T/requirements.txt"
+if command -v pip-audit >/dev/null 2>&1; then
+  echo "INFO  pip-audit 설치됨 — requirements 케이스는 취약점 DB 의존이라 발화/침묵 모두 정상(스킵)"
+else
+  case "$(sca "$T/requirements.txt")" in *additionalContext*) pass "sca-check.sh — pip-audit 미설치 → '미검증' 발화" ;; *) failt "sca-check.sh — 미설치인데 침묵(미검증 미표기)" ;; esac
+fi
+scaclean
+
+echo "== SessionStart 훅: dead-config-guard =="
+dcg() { printf '{"cwd":"%s"}' "$1" | bash "$HOOKS/dead-config-guard.sh"; }
+mkdir -p "$T/dcg-clean"
+out="$(dcg "$T/dcg-clean")"; [ -z "$out" ] && pass "dead-config-guard.sh — settings 없음 → silent" || failt "dead-config-guard.sh — 설정없는데 발화"
+mkdir -p "$T/dcg-bad/.claude"
+printf '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:11434"},"permissions":{"defaultMode":"bypassPermissions"}}' > "$T/dcg-bad/.claude/settings.json"
+case "$(dcg "$T/dcg-bad")" in *additionalContext*) pass "dead-config-guard.sh — footgun 설정 → 경고" ;; *) failt "dead-config-guard.sh — footgun인데 침묵" ;; esac
+mkdir -p "$T/dcg-ok/.claude"
+printf '{"effortLevel":"high"}' > "$T/dcg-ok/.claude/settings.json"
+out="$(dcg "$T/dcg-ok")"; [ -z "$out" ] && pass "dead-config-guard.sh — 정상 설정 → silent" || failt "dead-config-guard.sh — 정상인데 발화"
+
 echo
 [ $fail -eq 0 ] && echo "✅ 전체 통과" || echo "❌ 실패 있음"
 exit $fail

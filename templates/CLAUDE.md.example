@@ -28,7 +28,7 @@
 
 ## 작업 방식
 - 큰 변경은 **plan 먼저**. (Phase 분해는 필요할 때만 — 강제 아님)
-- **착수 게이트:** 새 기능·대형 리팩터·새 프로젝트는 (모호하지 않아도) 구현 전 `deep-interview`로 spec을 확정하고, 접근법이 둘 이상이거나 "어떻게 풀지" 막연하면 `brainstorm`으로 발산→수렴 먼저 — 감사 스킬과 달리 호출 trigger가 없어 건너뛰기 쉬운 단계다('착수=인터뷰' 습관화).
+- **착수 게이트:** 새 기능·대형 리팩터·새 프로젝트는 (모호하지 않아도) 구현 전 `deep-interview`로 spec을 확정하고, 접근법이 둘 이상이거나 "어떻게 풀지" 막연하면 `brainstorm`으로 발산→수렴 먼저. **분기 축:** 모호함이 **WHAT**(의도·스코프)이면 deep-interview, **HOW**(접근·해법)이면 brainstorm; 둘 다면 brainstorm(발산)→deep-interview(수렴) 순. — 감사 스킬과 달리 호출 trigger가 없어 건너뛰기 쉬운 단계다('착수=인터뷰' 습관화).
 - 아키텍처 문서(`docs/`)가 있으면 SSOT로 우선, 충돌 시 문서를 따른다.
 - **코딩 품질은 기본기다** — 주변 코드에 맞춰 잘 짠다. 특정 메트릭(응집도·결합도 등)을 강제하지 않는다.
 - "완료" 선언 전 검증을 **실제로 실행**: Python=ruff/mypy/pytest, TS=typecheck/test. 실패·skip은 정직하게 보고. (.py 저장 시 ruff는 플러그인 훅이 자동 점검 — standalone `ruff`/`mypy` 바이너리는 `ruff .`/`mypy .`, pytest만 `python3 -m pytest`.)
@@ -40,9 +40,9 @@
 - **한글 UI 기본값:** 텍스트 컨테이너는 `word-break: keep-all`을 기본으로, 표·카드는 모바일에서 가로스크롤이 아니라 세로 reflow를 설계 단계에서 계획. 빈·희박·아주 긴 이름 데이터로 본다.
 
 ## 스택 기본값 (팀에 맞게 조정)
-Python(FastAPI/Pydantic/pytest/ruff/mypy) · Next.js+TS · Docker · Supabase · AI는 Gemma/Ollama. 외부 도구는 무료 tier 우선.
+Python(FastAPI/Pydantic/pytest/ruff/mypy) · Next.js+TS · Docker · Supabase · AI는 클라우드 LLM(Claude API 등) 우선(로컬 LLM은 팀 선택). 외부 도구는 무료 tier 우선.
 
 ## 제공 도구 (ksi-harness 플러그인)
-- 스킬: `deep-interview`(착수 전 의도 확정) · `brainstorm`(발산→수렴) · `ui-audit`(UI 시각 검증) · `codebase-audit`(백엔드/일반 코드 병렬 감사→adversarial 검증→종합). 플러그인 설치 시 `/ksi-harness:<skill>`로 호출(또는 그냥 스킬명으로).
+- 스킬: `deep-interview`(착수 전 의도 확정) · `brainstorm`(발산→수렴) · `ui-audit`(UI 시각 검증) · `codebase-audit`(백엔드/일반 코드 병렬 감사→adversarial 검증→종합) · `release-risk`(배포·마이그·롤백·blast-radius 리스크 점검). 플러그인 설치 시 `/ksi-harness:<skill>`로 호출(또는 그냥 스킬명으로).
 - 서브에이전트는 **tier 전용 워커만** — **3-tier 워커 + 메인급**: `scout`(Haiku 잡일 — 비코드 write, **코드 수정 금지**)·`worker`(Sonnet high 구현 — 명세를 따른다)·`reviewer`(**Opus xhigh, read-only 검증 — 명세를 의심한다**: per-finding 반증·완성도 critic, Edit/Write 없음). 메인급(=세션 최상위 모델)은 **움직이는 천장이라 에이전트로 못박지 않는다** — 메인 자신 + model 미지정 inherit. 도메인 페르소나는 두지 않는다(전문성은 프롬프트/맥락에). 그 외는 빌트인(Explore=Haiku 탐색·Plan·general-purpose·code-review) + workflow inline agent. **roster는 동사 표가 아니라 tier 표** — 새 동사(patch·analyze·test…)는 거의 다 기존 tier에 산다(patch=worker, verify/critic=reviewer).
-- 검증 게이트 훅(플러그인): `.py` 저장 시 ruff lint(advisory, PostToolUse) · **민감 쓰기 경고**(PostToolUse — 하드코딩 시크릿·파괴적 migration DDL·settings.json drift를 경고-only) · Stop 시 — 미커밋 화면(.tsx/.jsx/.css) 편집엔 UI 시각+동선 검증 넛지, 미커밋 백엔드 상태전이/테스트(.py: tests·services·alembic) 편집엔 'green≠작동' 넛지(픽스처 우회·캐시 가짜green·DB dialect 분기). fan-out 서브에이전트 편집 포함.
+- 검증 게이트 훅(플러그인): `.py` 저장 시 ruff lint(advisory, PostToolUse) · **민감 쓰기 경고**(PostToolUse — 하드코딩 시크릿·파괴적 migration DDL·settings.json drift를 경고-only) · Stop 시 — 미커밋 화면(.tsx/.jsx/.css) 편집엔 UI 시각+동선 검증 넛지, 미커밋 백엔드 상태전이/테스트(.py: tests·services·alembic) 편집엔 'green≠작동' 넛지(픽스처 우회·캐시 가짜green·DB dialect 분기). fan-out 서브에이전트 편집 포함. **SCA**(PostToolUse — requirements/lock 변경 시 pip-audit/npm audit로 의존성 취약점) · **死config 경고**(SessionStart — 프로젝트 settings가 Claude를 로컬/외부 엔드포인트로 강제하거나 권한확인을 우회 시).

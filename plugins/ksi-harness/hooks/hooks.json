@@ -50,6 +50,11 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/dead-config-guard.sh",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/goal-status.sh",
+            "timeout": 15
           }
         ]
       }

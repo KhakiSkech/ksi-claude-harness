@@ -11,9 +11,9 @@ ultracode-first **멀티에이전트 워크플로 하네스**를 팀에 배포�
 | 구성요소 | 위치 | 설명 |
 |---|---|---|
 | **플러그인 `ksi-harness`** | `plugins/ksi-harness/` | 아래 4종을 번들 |
-| · 스킬 5 | `skills/` | `deep-interview`(의도 확정 — UI면 UX 축·멀티액터면 **어뷰징 축** 포함) · `brainstorm`(발산→수렴) · `codebase-audit`(백엔드 병렬 감사 + 수렴 루프 + **어뷰징·무결성**(self-dealing·경제무결성·게이밍·시간축권한)·**운영조건/fault-injection**(런타임 실패모드·환경분기 미관측) 렌즈 + 무손실 종합) · `ui-audit`(프론트 **시각 + UX 플로우** 감사: 흐름 단계수·에러복구·용어 SSOT·마이크로카피) · `release-risk`(배포·마이그·롤백·blast-radius 리스크 점검 — 자율성 게이트 운영화) |
+| · 스킬 6 | `skills/` | `deep-interview`(의도 확정 — UI면 UX 축·멀티액터면 **어뷰징 축** 포함) · `brainstorm`(발산→수렴) · `codebase-audit`(백엔드 병렬 감사 + 수렴 루프 + **어뷰징·무결성**(self-dealing·경제무결성·게이밍·시간축권한)·**운영조건/fault-injection**(런타임 실패모드·환경분기 미관측) 렌즈 + 무손실 종합) · `ui-audit`(프론트 **시각 + UX 플로우** 감사: 흐름 단계수·에러복구·용어 SSOT·마이크로카피) · `release-risk`(배포·마이그·롤백·blast-radius 리스크 점검 — 자율성 게이트 운영화) · `goals`(**durable goal-ledger** — 완료를 reviewer 증거 게이트로만 인정·조기완료 무효화/재오픈·`/goals run` evidence-gated 자율실행; 프로젝트별 `.ksi/ledger.jsonl` append-only. 헬퍼 `scripts/ksi-goals.py`) |
 | · tier 워커 3 | `agents/` | `scout`(Haiku 잡일 — 비코드 write) · `worker`(Sonnet high 구현) · `reviewer`(Opus xhigh, **read-only 검증** — adversarial 반증·완성도 critic) — 페르소나 아닌 **모델 tier 레버**(메인급은 움직이는 천장이라 에이전트 없음) |
-| · 검증 게이트 훅 6 | `scripts/` + `hooks/hooks.json` | `ruff-check.sh`(.py 저장 시 lint, advisory) · `secret-scan.sh`(저장 시 **민감 쓰기 경고**, PostToolUse: 하드코딩 시크릿·파괴적 migration DDL·settings.json drift — 경고-only, 오탐방지·1h dedup) · `sca-check.sh`(의존성 매니페스트/lock 변경 시 **pip-audit/npm audit**, high+ 취약점 경고, PostToolUse; 도구 미설치는 '미검증'으로 표기) · `ui-render-check.sh`(화면 미커밋 편집 시 시각+동선 검증 넛지, Stop) · `backend-verify-check.sh`(백엔드 상태전이/테스트 미커밋 편집 시 'green≠작동' 넛지: 픽스처 우회·캐시 가짜green·DB dialect, Stop) · `dead-config-guard.sh`(프로젝트 settings가 Claude를 로컬/외부 엔드포인트로 강제하거나 권한확인 우회 시 경고, SessionStart) |
+| · 검증 게이트 훅 6 | `scripts/` + `hooks/hooks.json` | `ruff-check.sh`(.py 저장 시 lint, advisory) · `secret-scan.sh`(저장 시 **민감 쓰기 경고**, PostToolUse: 하드코딩 시크릿·파괴적 migration DDL·settings.json drift — 경고-only, 오탐방지·1h dedup) · `sca-check.sh`(의존성 매니페스트/lock 변경 시 **pip-audit/npm audit**, high+ 취약점 경고, PostToolUse; 도구 미설치는 '미검증'으로 표기) · `ui-render-check.sh`(화면 미커밋 편집 시 시각+동선 검증 넛지, Stop) · `backend-verify-check.sh`(백엔드 상태전이/테스트 미커밋 편집 시 'green≠작동' 넛지: 픽스처 우회·캐시 가짜green·DB dialect, Stop) · `dead-config-guard.sh`(프로젝트 settings가 Claude를 로컬/외부 엔드포인트로 강제하거나 권한확인 우회 시 경고, SessionStart) · `goal-status.sh`(프로젝트에 `.ksi/goals.json` 있으면 미완 goal 1줄 넛지, SessionStart) |
 | **doctrine 템플릿** | `templates/CLAUDE.md.example` · `templates/domain-invariants.example.md` | 언어·ultracode·모델 티어링·자율성·검증 게이트 doctrine (전역 CLAUDE.md 배포 불가 → 직접 복사) + `## 도메인 불변식` SSOT 스캐폴딩(4 어뷰징클래스 + 아키타입별 채움 예시 — codebase-audit 어뷰징 렌즈의 조준점) |
 | **설정 예시** | `templates/*.json` | 팀 자동활성화 · 권장 사용자 설정 |
 | **telemetry** | `scripts/harness-cost-report.sh` | transcript에서 프로젝트별 model/tier 분포·oversubscription(opus 과편중·reviewer 우회) 집계 — 의존성 없음(native OTEL opt-in 안내 포함) |
@@ -97,7 +97,7 @@ bash scripts/sync-machine.sh        # 모드 자동 감지 (Windows는 git-bash�
 - 강제 지정: `--plugin` / `--native`.
 
 ## 훅 행동 회귀 테스트
-훅을 수정했거나 새 머신(Windows git-bash 포함)에 깔았으면 한 번 돌린다 — 합성 repo+transcript로 6개 훅의 발화/침묵 14케이스를 검사(ruff·pip-audit 미설치 머신은 해당 케이스 SKIP):
+훅을 수정했거나 새 머신(Windows git-bash 포함)에 깔았으면 한 번 돌린다 — 합성 repo+transcript로 **전 훅(검증 게이트 6 + goal-ledger 넛지)의 발화/침묵 케이스**를 검사(ruff·pip-audit 미설치 머신은 해당 케이스 SKIP):
 ```
 scripts/test-hooks.sh          # ✅ 전체 통과 가 나와야 함
 ```

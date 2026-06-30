@@ -1,6 +1,6 @@
 {
   "name": "ksi-harness",
-  "description": "ultracode-first 멀티에이전트 워크플로 하네스 — codebase-audit/ui-audit/brainstorm/deep-interview/release-risk 스킬 + 3-tier 워커(scout=Haiku, worker=Sonnet, reviewer=Opus read-only 검증) + 검증 게이트 훅(ruff lint, UI 렌더 넛지, 민감 쓰기 경고, SCA 의존성 취약점, 死config 경고) + 세션 시작 시 업데이트 알림. 모델 티어링·adversarial 검증·검증 게이트가 스킬/에이전트에 baked-in. main-agnostic(Fable/Opus 어느 메인이든 동작).",
-  "version": "0.5.0",
+  "description": "ultracode-first 멀티에이전트 워크플로 하네스 — codebase-audit/ui-audit/brainstorm/deep-interview/release-risk/goals 스킬 + 3-tier 워커(scout=Haiku, worker=Sonnet, reviewer=Opus read-only 검증) + 검증 게이트 훅(ruff lint, UI 렌더 넛지, 민감 쓰기 경고, SCA 의존성 취약점, 死config 경고, goal-ledger 넛지) + 세션 시작 시 업데이트 알림. goals=durable goal-ledger(완료를 증거 게이트로만 인정·자율실행 evidence-gated exit). 모델 티어링·adversarial 검증·검증 게이트가 스킬/에이전트에 baked-in. main-agnostic(Fable/Opus 어느 메인이든 동작).",
+  "version": "0.6.0",
   "author": { "name": "KSI" }
 }

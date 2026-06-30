@@ -127,6 +127,17 @@ mkdir -p "$T/dcg-ok/.claude"
 printf '{"effortLevel":"high"}' > "$T/dcg-ok/.claude/settings.json"
 out="$(dcg "$T/dcg-ok")"; [ -z "$out" ] && pass "dead-config-guard.sh — 정상 설정 → silent" || failt "dead-config-guard.sh — 정상인데 발화"
 
+echo "== SessionStart 훅: goal-status (goal-ledger 넛지) =="
+PR="$(dirname "$HOOKS")"   # plugin root → CLAUDE_PLUGIN_ROOT (scripts/ksi-goals.py 위치)
+gs() { printf '{"cwd":"%s"}' "$1" | CLAUDE_PLUGIN_ROOT="$PR" bash "$HOOKS/goal-status.sh"; }
+mkdir -p "$T/gs-none"
+out="$(gs "$T/gs-none")"; [ -z "$out" ] && pass "goal-status.sh — .ksi 없음 → silent" || failt "goal-status.sh — 원장없는데 발화"
+KG="$HOOKS/ksi-goals.py"
+python3 "$KG" --dir "$T/gs-ok" init --project demo >/dev/null 2>&1
+python3 "$KG" --dir "$T/gs-ok" register --id G1 --title work >/dev/null 2>&1
+python3 "$KG" --dir "$T/gs-ok" start --id G1 >/dev/null 2>&1
+case "$(gs "$T/gs-ok")" in *additionalContext*) pass "goal-status.sh — 미완 goal → 넛지" ;; *) failt "goal-status.sh — 미완 goal인데 침묵" ;; esac
+
 echo
 [ $fail -eq 0 ] && echo "✅ 전체 통과" || echo "❌ 실패 있음"
 exit $fail

@@ -35,12 +35,12 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 - **운영조건/fault-injection** *(맥락추론 — `model:'opus'` 라우팅)* — 정적 코드가 아니라 런타임 실패 모드: 외부의존(거래소·결제·소켓·큐)·상태기계면 타임아웃·부분체결·에러코드·rate-limit·재연결·동시성에서 어떻게 깨지나. **스테이징/testnet이 구조적으로 못 보는 환경분기가 있으면 'done'이 아니라 '실환경 카나리 전 unknown'으로 표기.**
 - workflow: `agent(prompt, {model: 'sonnet', schema})`
 - 인터랙티브: Task로 `subagent_type: worker` spawn (worker.md가 Sonnet+effort 고정)
-- 어려운 추론이 필요한 단위만 `'opus'`로.
+- 어려운 추론이 필요한 단위만 `'opus'`로. **xhigh를 지원하는 Sonnet 세대(Sonnet 5+)에선 ultracode의 inline sonnet analyze도 실제 xhigh를 상속 → 이 임계가 올라간다**(opus로 보낼 단위는 준다). 단 어뷰징·무결성/운영조건·fault-injection 렌즈는 자금경로·운영신뢰성의 비대칭 miss-cost 때문에 opus 유지가 기본 — `paired-run` 스팟체크(같은 단위 sonnet/opus 대조)로 실측 전엔 내리지 말 것(경제무결성 슬라이스는 싼 tier가 real high를 놓치는 material_gap 경향).
 
 ## 4. adversarial 검증 — opus tier (생략 금지)
 각 critical/high finding(기본 — dial로 medium 이하 확장)을 **다른 에이전트가 반증 시도** — 실제 파일/근거를 다시 열어 거짓양성·과장·지어낸 명령/경로를 거른다. 살아남은 것만 채택. 확실치 않으면 보수적으로 의심. (§0.5 verify 트리거와 동일 기준 — 절마다 다르게 읽히면 안 된다.)
 - 검증 tier = **`reviewer`**(Opus xhigh, read-only — Edit/Write 없어 "검증하다 슬쩍 고치기" 구조적 차단). workflow: `agent(\`반증하라: ${finding}\`, {agentType: 'reviewer', schema: VERDICT})` (`{model:'opus'}`도 동작하나 reviewer면 effort·read-only가 frontmatter로 고정). 인터랙티브: Task로 `subagent_type: reviewer` spawn.
-- **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·자금 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐.
+- **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·자금 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐. **싼 tier가 near-Opus라도 verify tier는 그 tier로 안 내린다** — producer(worker)와 같은 weight면 blind spot이 correlated라 반증이 죽는다(cross-model skeptic이 핵심). 비용은 downgrade 기준이 아님.
 
 ## 5. 완성도 critic → verify 재투입 (수렴 루프, opus tier)
 별도 렌즈로 "빠진 게 뭔가 — 안 본 모듈·미검증 주장·미확인 가정·안 돌린 렌즈"를 재점검. critic·verify 모두 **`reviewer` tier**(§4) — 둘은 같은 opus read-only 검증 에이전트의 두 모드(반증 vs 완성도)일 뿐 별도 에이전트가 아니다.

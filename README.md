@@ -105,6 +105,9 @@ scripts/test-hooks.sh          # ✅ 전체 통과 가 나와야 함
 ## 재사용 감사 루프 (audit-loop workflow)
 `templates/workflows/audit-loop.js` = codebase-audit·ui-audit의 fan-out→adversarial verify→critic(검증 후 재투입) 루프를 코드로 박은 골격. `~/.claude/workflows/`(개인) 또는 프로젝트 `.claude/workflows/`에 복사하면, 매 감사마다 pipeline을 재작성하지 않고 `units`(키+프롬프트)와 dial만 넘겨 호출한다. 자세한 args는 파일 상단 주석.
 
+## tier 검증 골격 (paired-run workflow)
+`templates/workflows/paired-run.js` = 새 모델 출시 때 "tier X가 렌즈 Z에서 tier Y를 대체할 수 있나"를 싸게 답하는 골격. 같은 unit을 challenger(기본 sonnet)·reference(기본 opus)로 **동일 프롬프트** 분석 → reviewer가 reference-only finding을 코드로 재검증(환각 제외)해 진짜 recall gap만 집계하고 verdict(material_gap/minor_gap/challenger_sufficient)를 반환한다. audit-loop(버그 *발견*)과 shape가 다른 *tier 라우팅 검증* 도구. `units`+`context`(렌즈 spec·통제 핵심)+`lens`+dial(challengerModel·referenceModel)만 넘긴다. 자세한 args는 파일 상단 CONTRACT 주석.
+
 ## 배포 전 검증 (repo **루트의 부모** 디렉토리에서 실행)
 ```
 claude plugin validate ./ksi-claude-harness/plugins/ksi-harness   # 플러그인 매니페스트

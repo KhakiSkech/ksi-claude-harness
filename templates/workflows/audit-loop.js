@@ -30,6 +30,9 @@ const units0 = Array.isArray(A.units) ? A.units.filter((u) => u && u.key && u.pr
 if (!units0.length) return { error: 'args.units가 비어 있음 — [{key, prompt}] 필요' }
 const CTX = A.context || ''
 const analyzeModel = A.analyzeModel || 'sonnet'
+// verify/critic 기본을 opus 밑으로 내리지 말 것 — producer(worker=sonnet)와 같은 weight면 blind spot이
+// correlated라 error-decorrelation이 사라진다(cross-model opus skeptic이라야 반증이 산다). 싼 tier가 near-Opus라도
+// verify는 그 tier로 안 내린다 — 비용은 downgrade 기준이 아님.
 const verifyModel = A.verifyModel || 'opus'
 const criticModel = A.criticModel || 'opus'
 const maxRounds = Math.max(1, Math.min(4, A.maxRounds || 2))

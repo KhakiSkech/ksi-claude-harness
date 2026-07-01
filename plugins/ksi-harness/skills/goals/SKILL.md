@@ -1,7 +1,7 @@
 ---
 name: goals
 description: 프로젝트의 장기 목표를 세션 너머로 기억하는 durable goal-ledger. "완료"를 자기신고가 아니라 adversarial 증거 게이트(reviewer 검증)로만 인정하고, 나중에 조기완료로 드러나면 무효화·재오픈한다(green≠작동의 멀티세션화). append-only 원장 + 증거 게이트 패턴.
-when_to_use: 프로젝트급·멀티세션·substantive 목표를 추적할 때(예: "이 제품을 파일럿 납품 수준까지"). 여러 프로젝트를 오갈 때 "어디까지 했나·뭐가 가짜로 끝났나"를 복원. **단일 편집·오타·1세션·단순 CRUD엔 쓰지 말 것**(per-task 추적 아님 — 발동은 명시적, trivial은 원장을 안 건드린다).
+when_to_use: 프로젝트급·멀티세션·substantive 목표를 추적할 때(예를 들어 "이 제품을 파일럿 납품 수준까지"). 여러 프로젝트를 오갈 때 "어디까지 했나·뭐가 가짜로 끝났나"를 복원. **단일 편집·오타·1세션·단순 CRUD엔 쓰지 말 것**(per-task 추적 아님 — 발동은 명시적, trivial은 원장을 안 건드린다).
 ---
 
 # Goals — durable goal-ledger

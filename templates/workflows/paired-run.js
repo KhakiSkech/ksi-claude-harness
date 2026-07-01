@@ -1,0 +1,167 @@
+export const meta = {
+  name: 'paired-run',
+  description: '재사용 tier-검증 골격 — 같은 unit을 challenger(기본 sonnet)·reference(기본 opus) 두 tier로 동일 프롬프트 분석 → reviewer가 gap을 diff하되 reference-only finding을 코드로 재검증(환각 크레딧 차단)해 진짜 recall gap만 집계. model 출시마다 "tier X가 렌즈 Z에서 tier Y를 대체하나"를 싸게 답한다.',
+  whenToUse: '새 model 출시·tier 배치 재검토 시. audit-loop(버그 발견)과 shape가 다른 tier-라우팅 검증 골격 — units(키+프롬프트)+context(렌즈 spec)만 넘긴다. 단일 파일 조회엔 오버킬.',
+  phases: [
+    { title: 'PairedAnalyze', detail: 'same unit을 challenger·reference가 동일 프롬프트로(통제 비교)' },
+    { title: 'GapDiff', detail: 'reviewer가 두 set diff + reference-only 실재 재검증(환각 제외)' },
+  ],
+}
+
+// ==== CONTRACT (SSOT — 스킬/산문은 의미를 재명세하지 말고 여기를 참조) ====
+//  recall_gap    = reference가 잡고 challenger가 놓친 finding 중 코드 재검증으로 실재 확인된 것.
+//                  reference 환각·과장은 제외한다 — reference에 공짜 크레딧을 주면 gap이 부풀려진다.
+//  verdict/unit  = challenger_sufficient(실재 reference-only 0 또는 low만) · minor_gap(medium 이하) · material_gap(critical/high를 challenger가 놓침).
+//  aggregate     = 최악 unit verdict. material 하나라도면 그 렌즈는 reference 유지가 정답.
+//  통제(핵심)     = challenger/reference는 **model만** 다르고 프롬프트·context·schema는 동일. 이게 깨지면 비교가 아니라 잡음이다.
+//  effort        = analyze는 inline agent라 세션 effort를 상속(ultracode면 기본 sonnet/opus 쌍은 양쪽 다 xhigh = 동일 조건. 단 challenger가 xhigh 미지원 tier[haiku·pre-5 Sonnet]면 effort 통제가 깨짐). gap-diff는 reviewer(opus·xhigh·read-only, 부재 시 opus 폴백).
+//  왜 reviewer로 diff = producer(challenger/reference)와 다른 skeptic이 있어야 reference 환각·과장을 걸러 gap을 정직하게 잰다(cross-model error-decorrelation). challenger로 diff하면 correlated blind spot.
+//  한계          = 스팟체크지 벤치마크 아님(n=units·1회). verdict는 방향 신호 — caveat을 결과에 동봉해 과신을 막는다.
+// ====
+
+// ---- args (dial) ----
+// units: [{key, prompt}]        필수 — unit별 분석 지시(무엇을 Read/분석). 출력 지시 불필요(스키마 강제).
+// context: 공통 맥락(제품·렌즈 spec·규율). 모든 프롬프트 앞에 붙음 — 통제의 핵심이라 강력 권장.
+// challengerModel='sonnet'      싼 후보 tier(alias만 — 풀 ID 금지)
+// referenceModel='opus'         기준 tier(alias만)
+// lens='(미지정)'                렌즈 이름(라벨·프롬프트용, 예: '경제무결성·fault-injection')
+// gapAgent='reviewer'           gap-diff를 reviewer 서브에이전트(opus·xhigh·read-only)로 라우팅. false면 model 기반(gapModel).
+// gapModel='opus'               reviewer 부재/미해석 시 폴백 모델.
+let A = args || {}
+if (typeof A === 'string') {
+  try { A = JSON.parse(A) } catch (e) { return { error: 'args가 문자열인데 JSON 파싱 실패 — 객체로 넘기거나 유효한 JSON으로' } }
+}
+const units = Array.isArray(A.units) ? A.units.filter((u) => u && u.key && u.prompt) : []
+if (!units.length) return { error: 'args.units가 비어 있음 — [{key, prompt}] 필요' }
+const CTX = A.context || ''
+const challengerModel = A.challengerModel || 'sonnet'
+const referenceModel = A.referenceModel || 'opus'
+const lens = A.lens || '(미지정 렌즈)'
+const gapAgent = A.gapAgent === undefined ? 'reviewer' : A.gapAgent
+const gapModel = A.gapModel || 'opus'
+
+const FIND = {
+  type: 'object', additionalProperties: false,
+  required: ['summary', 'findings'],
+  properties: {
+    summary: { type: 'string', description: '이 unit 전반 평가 1~3문장(한국어)' },
+    findings: {
+      type: 'array', maxItems: 15,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['title', 'severity', 'where', 'evidence', 'impact', 'confidence'],
+        properties: {
+          title: { type: 'string' },
+          severity: { enum: ['critical', 'high', 'medium', 'low'] },
+          category: { type: 'string', description: '렌즈 내 하위 분류(선택)' },
+          where: { type: 'string', description: 'file:line 또는 위치' },
+          evidence: { type: 'string', description: '실제로 읽고 본 것 — 추측 금지, 불확실하면 confidence를 낮춰 명시' },
+          impact: { type: 'string' },
+          confidence: { enum: ['high', 'medium', 'low'] },
+        },
+      },
+    },
+  },
+}
+
+const GAP = {
+  type: 'object', additionalProperties: false,
+  required: ['unit', 'reference_only_real', 'reference_only_hallucinated', 'challenger_only_real', 'verdict', 'note'],
+  properties: {
+    unit: { type: 'string' },
+    reference_only_real: {
+      type: 'array', maxItems: 12, description: 'reference가 잡고 challenger가 놓친 것 중 코드로 재확인해 실재하는 것(=진짜 recall gap)',
+      items: {
+        type: 'object', additionalProperties: false, required: ['title', 'where', 'severity', 'why_real'],
+        properties: { title: { type: 'string' }, where: { type: 'string' }, severity: { enum: ['critical', 'high', 'medium', 'low'] }, why_real: { type: 'string', description: '재확인 근거(파일:라인)' } },
+      },
+    },
+    reference_only_hallucinated: {
+      type: 'array', maxItems: 12, description: 'reference만 냈으나 재검증 시 환각·과장이라 recall gap으로 안 세는 것',
+      items: {
+        type: 'object', additionalProperties: false, required: ['title', 'why_not_real'],
+        properties: { title: { type: 'string' }, why_not_real: { type: 'string' } },
+      },
+    },
+    challenger_only_real: {
+      type: 'array', maxItems: 12, description: 'challenger가 잡고 reference가 놓친 것 중 실재하는 것',
+      items: {
+        type: 'object', additionalProperties: false, required: ['title', 'where'],
+        properties: { title: { type: 'string' }, where: { type: 'string' } },
+      },
+    },
+    verdict: { enum: ['challenger_sufficient', 'minor_gap', 'material_gap'], description: 'challenger_sufficient=실재 reference-only 0 또는 low만, minor_gap=medium 이하, material_gap=critical/high를 challenger가 놓침' },
+    note: { type: 'string', description: '겹침 처리·심각도 조정·특기 반증관계(한국어)' },
+  },
+}
+
+// gap-diff = reviewer tier(opus·xhigh·read-only). 미설치/미해석이면 model 기반 opus로 graceful 폴백(silent no-op 방지).
+const reviewAgent = (prompt, label, ph, schema) =>
+  gapAgent
+    ? agent(prompt, { label, phase: ph, schema, agentType: gapAgent }).catch(() => agent(prompt, { label, phase: ph, schema, model: gapModel }))
+    : agent(prompt, { label, phase: ph, schema, model: gapModel })
+
+const fmt = (set) =>
+  !set
+    ? '(분석 실패/null)'
+    : (set.findings || []).map((f) => `- [${f.severity}${f.category ? '/' + f.category : ''}] ${f.title} @ ${f.where} (conf ${f.confidence})\n    evidence: ${f.evidence}`).join('\n') || '(finding 0건)'
+
+phase('PairedAnalyze')
+log(`paired-run: ${units.length}개 unit × {challenger=${challengerModel}, reference=${referenceModel}} · 렌즈=${lens}`)
+
+// canonical no-barrier: unit별로 challenger·reference 분석이 끝나는 즉시 그 unit의 gap-diff가 돈다.
+const perUnit = (
+  await pipeline(
+    units,
+    async (u) => {
+      const [c, r] = await parallel([
+        () => agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}:challenger(${challengerModel})`, phase: 'PairedAnalyze', model: challengerModel, schema: FIND }),
+        () => agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}:reference(${referenceModel})`, phase: 'PairedAnalyze', model: referenceModel, schema: FIND }),
+      ])
+      return { key: u.key, challenger: c, reference: r }
+    },
+    async (res) => {
+      if (!res || (!res.challenger && !res.reference)) return null
+      const prompt = `${CTX}
+
+## paired-run gap diff — unit "${res.key}" · 렌즈: ${lens}
+같은 unit을 challenger(${challengerModel})와 reference(${referenceModel})가 동일 프롬프트로 분석했다. 임무: **reference가 잡고 challenger가 놓친 finding이 실재하는지** 근거(파일:라인·명령)를 직접 다시 열어 재검증한다 — 환각·과장이면 recall gap으로 세지 않는다(reference에 공짜 크레딧 금지). reference의 과장 심각도는 down-adjust. challenger만 잡은 실재 finding도 본다. 기본자세는 의심.
+
+### CHALLENGER(${challengerModel}) findings:
+${fmt(res.challenger)}
+
+### REFERENCE(${referenceModel}) findings:
+${fmt(res.reference)}
+
+두 set을 semantic하게 대조(제목이 달라도 같은 결함이면 겹침으로 본다). reference_only 후보를 실제로 재확인 → 실재=reference_only_real, 환각/과장=reference_only_hallucinated. verdict = 실재하는 reference_only의 최고 심각도 기준(critical/high면 material_gap · medium이면 minor_gap · 없거나 low만이면 challenger_sufficient).`
+      return reviewAgent(prompt, `gapdiff:${res.key}`, 'GapDiff', GAP)
+    },
+  )
+).filter(Boolean)
+
+// aggregate = 최악 verdict. material 하나라도면 그 렌즈는 reference 유지.
+const rank = { material_gap: 0, minor_gap: 1, challenger_sufficient: 2 }
+const worst = perUnit.length ? perUnit.reduce((w, g) => (rank[g.verdict] < rank[w] ? g.verdict : w), 'challenger_sufficient') : null
+const recommendation =
+  worst === 'material_gap'
+    ? `이 렌즈는 ${referenceModel} 유지 — challenger(${challengerModel})가 real critical/high를 놓침(material_gap).`
+    : worst === 'minor_gap'
+      ? `${challengerModel} 근접 — 실재 reference-only가 medium 이하뿐. 저 miss-cost 렌즈면 fit-driven downgrade 여지, 고 miss-cost(자금·안전)면 ${referenceModel} 유지 권장.`
+      : worst === 'challenger_sufficient'
+        ? `${challengerModel} 충분 — 실재 reference-only 0 또는 low만. fit-driven downgrade 후보(다른 대상/unit으로 재확인 권장).`
+        : '(unit 전부 실패 — 결론 없음)'
+
+const halluc = perUnit.reduce((n, g) => n + (g.reference_only_hallucinated || []).length, 0)
+if (halluc) log(`※ reference가 낸 것 중 ${halluc}건이 재검증서 환각/과장으로 걸러짐 — 그만큼 gap을 부풀리지 않음(정상).`)
+log(`aggregate: ${worst} — ${recommendation}`)
+
+return {
+  lens,
+  challenger: challengerModel,
+  reference: referenceModel,
+  aggregate_verdict: worst,
+  recommendation,
+  caveat: `스팟체크 — n=${units.length} unit·1회 실행. verdict는 방향 신호지 벤치마크 아님(labeled set + precision/recall이 아님). 다른 대상/렌즈로 재확인 시 신뢰 상승.`,
+  reference_hallucinated_count: halluc,
+  per_unit: perUnit,
+}

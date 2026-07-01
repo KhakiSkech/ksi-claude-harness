@@ -12,7 +12,7 @@ when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 �
 감사·adversarial verify·완성도 critic 루프는 `~/.claude/workflows/audit-loop.js`(saved workflow)를 재사용 — codebase-audit과 **같은 골격**을 픽셀 감사에 쓴다. **캡처(§2)는 골격 밖에서 먼저** 하고, units에 페이지/차원별 프롬프트 + 스크린샷 경로를 넘긴다.
 `Workflow({scriptPath: '~/.claude/workflows/audit-loop.js', args: {units:[{key,prompt}], context, verifySeverities, maxRounds, analyzeModel}})`
 - **루프 의미론(트리거·survivor·정지·degraded·폴백)의 SSOT = audit-loop.js 상단 LOOP CONTRACT 주석** — 여기서 재명세하지 않는다(산문↔코드 drift 차단). dial: verifySeverities(기본 critical/high)·maxRounds(기본 2·천장 4)·analyzeModel(기본 sonnet).
-- **티어링(픽셀판):** 캡처·인벤토리=haiku(scout/Explore) · 시각 감사=`model:'sonnet'` · **발견성·역할게이팅·흐름단절 등 맥락추론 렌즈=`model:'opus'`** · verify/critic=reviewer(LOOP CONTRACT) · 종합=메인. 모델 배치 일반 규칙은 CLAUDE.md 참조.
+- **티어링(픽셀판):** 캡처·인벤토리=haiku(scout/Explore) · 시각 감사=`model:'sonnet'` · **발견성·역할게이팅·흐름단절 등 맥락추론 렌즈=`model:'opus'`** · verify/critic=reviewer(LOOP CONTRACT) · 종합=메인. 모델 배치 일반 규칙은 CLAUDE.md 참조. 맥락추론 렌즈의 opus 라우팅은 저 miss-cost라도 기본 유지 — sonnet 기본화(비용↓)는 `paired-run` 스팟체크로 검증 후(빈/희박 상태를 '못 찾아 비었다'와 혼동할 위험).
 - **context에 design-side spec을 반드시 넣는다** — UX목표 5축(페르소나·동선 step-budget·상태 인벤토리·마이크로카피 SSOT·접근성 예산 = CLAUDE.md 작업방식 SSOT). 기준 없는 시각 감사는 '안 깨졌나'만 잰다.
 
 ## 절차

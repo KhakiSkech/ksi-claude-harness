@@ -8,12 +8,16 @@ export const meta = {
 //  survivor   = verdict ≠ 'refuted' 인 finding (verify 실패=error 는 confirmed 아님 → degraded 버킷).
 //  verify 트리거 = verifySeverities(기본 critical/high). 미트리거 = 'unverified'(정책 skip, 실패 아님).
 //  verify 실패(throw/rate-limit) = 'error' → degraded[]에 격리, counts에 confirmed로 세지 않음, return.degraded=true.
+//  analyze 실패 = 해당 unit은 coveredUnits에서 제외하고 units_analyze_failed[]에 격리(위장 커버리지 금지) → return.degraded=true.
+//  critic 호출 실패(throw) = critic_failed=true(완성도 재점검 미수행) → return.degraded=true.
+//  reviewer agentType 폴백(agentType 실패→opus model 폴백)은 성공 경로이나 counts.reviewer_fallbacks로 가시화(degraded 미반영).
 //  정지       = critic 무소득 또는 round == maxRounds(기본 2 · 천장 4, dial). 남은 미탐색 단위 = units_deferred.
-//  tier       = analyze:sonnet(dial) · verify/critic:reviewer(opus·xhigh·read-only, 부재 시 opus 폴백).
+//  tier       = analyze:sonnet(dial, unit별 model override 가능) · verify/critic:reviewer(opus·xhigh·read-only, 부재 시 opus 폴백).
 // ====
 
 // ---- args (dial) ----
-// units: [{key, prompt}]  필수 — 단위별 분석 지시(출력 지시는 불필요, 스키마가 강제).
+// units: [{key, prompt, model?}]  필수 — 단위별 분석 지시(출력 지시는 불필요, 스키마가 강제).
+//   model은 unit별 analyzeModel override(alias만 — 풀 ID 금지), 미지정시 analyzeModel 사용.
 // context: 모든 에이전트 프롬프트 앞에 붙는 공통 맥락(제품·페르소나·경로·design-side spec). 강력 권장.
 // analyzeModel='sonnet'  (alias만 — 풀 ID 금지)
 // reviewerAgent='reviewer' (기본) — verify·critic을 reviewer 서브에이전트(opus·xhigh·read-only)로 라우팅: frontmatter가
@@ -30,9 +34,9 @@ const units0 = Array.isArray(A.units) ? A.units.filter((u) => u && u.key && u.pr
 if (!units0.length) return { error: 'args.units가 비어 있음 — [{key, prompt}] 필요' }
 const CTX = A.context || ''
 const analyzeModel = A.analyzeModel || 'sonnet'
-// verify/critic 기본을 opus 밑으로 내리지 말 것 — producer(worker=sonnet)와 같은 weight면 blind spot이
-// correlated라 error-decorrelation이 사라진다(cross-model opus skeptic이라야 반증이 산다). 싼 tier가 near-Opus라도
-// verify는 그 tier로 안 내린다 — 비용은 downgrade 기준이 아님.
+// verify/critic 기본을 opus 밑으로(예: Sonnet 5) 내리지 말 것 — producer(worker=sonnet)와 같은 weight면
+// blind spot이 correlated라 error-decorrelation이 사라진다(cross-model opus skeptic이라야 반증이 산다).
+// 게다가 Sonnet 5는 '보수적 지시 literal 추종'(코드리뷰/verify recall 손실) 패턴이 VERDICT의 '기본 태도는 의심'과 겹친다.
 const verifyModel = A.verifyModel || 'opus'
 const criticModel = A.criticModel || 'opus'
 const maxRounds = Math.max(1, Math.min(4, A.maxRounds || 2))
@@ -40,14 +44,27 @@ const verifySev = Array.isArray(A.verifySeverities) ? A.verifySeverities : ['cri
 const useCritic = A.critic !== false
 // batchSize: 한 라운드의 analyze fan-out을 N개 단위씩 끊어 실행(청크 사이 barrier) — 동시
 // 실행 에이전트 수를 줄여 API rate-limit(TPM/ITPM) cascade 실패를 회피. 기본=전체(끊지 않음, 종전 동작).
-const batchSize = Math.max(1, A.batchSize || units0.length)
+let batchSize = A.batchSize
+if (!(Number.isFinite(batchSize) && batchSize >= 1)) {
+  if (batchSize !== undefined) log(`⚠ batchSize 값 비정상(${JSON.stringify(A.batchSize)}) → units0.length(${units0.length})로 폴백`)
+  batchSize = units0.length
+}
 // verify/critic = reviewer tier(opus·xhigh·read-only). reviewerAgent=false면 처음부터 model 기반.
 const reviewerAgent = A.reviewerAgent === undefined ? 'reviewer' : A.reviewerAgent
 // reviewer로 실행하되 미설치·미해석(agentType 미등록)이면 model 기반 opus로 폴백 —
 // verify가 silent no-op(미검증 finding을 그냥 confirmed)으로 무너지지 않게(가짜 green 방지).
+let reviewerFallbacks = 0
+let reviewerFallbackWarned = false
 const reviewAgent = (prompt, label, phase, schema, fallbackModel) =>
   reviewerAgent
-    ? agent(prompt, { label, phase, schema, agentType: reviewerAgent }).catch(() => agent(prompt, { label, phase, schema, model: fallbackModel }))
+    ? agent(prompt, { label, phase, schema, agentType: reviewerAgent }).catch(() => {
+        reviewerFallbacks++
+        if (!reviewerFallbackWarned) {
+          reviewerFallbackWarned = true
+          log(`⚠ reviewer agentType 실패 → opus 모델 폴백(effort 고정 상실 가능)`)
+        }
+        return agent(prompt, { label, phase, schema, model: fallbackModel })
+      })
     : agent(prompt, { label, phase, schema, model: fallbackModel })
 
 const FINDINGS = {
@@ -148,6 +165,9 @@ const absorb = (f, unit) => {
 }
 
 const coveredUnits = []
+const analyzeFailed = [] // analyze 실패 unit.key — coveredUnits로 위장 커버리지 되지 않게 격리(H1)
+let criticFailedCount = 0
+let dedupSkipped = 0
 let pending = units0
 let round = 0
 
@@ -155,26 +175,44 @@ while (pending.length && round < maxRounds) {
   round++
   phase(`Round ${round}`)
   log(`Round ${round}: ${pending.length}개 단위 분석 (analyze=${analyzeModel}, verify=${verifyModel})`)
-  coveredUnits.push(...pending.map((u) => u.key))
 
   // canonical no-barrier: 단위별로 분석이 끝나는 즉시 그 단위의 verify가 돈다.
   // batchSize로 동시 분석 단위 수를 제한(청크 사이는 barrier) — API rate-limit cascade 회피.
   const analyzeStage = (u) =>
-    agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}`, phase: `Round ${round}`, schema: FINDINGS, model: analyzeModel })
+    agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}`, phase: `Round ${round}`, schema: FINDINGS, model: u.model || analyzeModel })
   const verifyStage = (r, u) => {
-    if (!r) return { unit: u.key, findings: [] }
-    const fresh = (r.findings || []).filter((f) => !seen.has(keyOf(f)))
+    // 주의: pipeline은 stage1(analyze)이 null이면 stage2를 아예 호출하지 않는다(런타임 실구현 확인)
+    // — 이 분기는 방어용 dead path이고 실동작은 배치 루프의 `!r` prong이다. `!r` 가드를 지우면 회귀한다.
+    if (!r) return { unit: u.key, findings: [], analyze_failed: true }
+    const all = r.findings || []
+    const fresh = all.filter((f) => !seen.has(keyOf(f)))
+    dedupSkipped += all.length - fresh.length
     fresh.forEach((f) => seen.add(keyOf(f)))
     const toV = fresh.filter((f) => verifySev.includes(f.severity))
     const rest = fresh.filter((f) => !verifySev.includes(f.severity)).map((f) => ({ ...f, verdict: { verdict: 'unverified', corrected_severity: null, note: 'verify 트리거 미해당(dial)' } }))
     if (!toV.length) return { unit: u.key, findings: rest }
     return parallel(toV.map((f) => () => verifyOne(f, round))).then((vs) => ({ unit: u.key, findings: [...vs.filter(Boolean), ...rest] }))
   }
+  // 인덱스 정렬로 chunk[j]와 res[j]를 대응 — analyze 실패 unit은 coveredUnits가 아니라 analyzeFailed로(H1).
   for (let i = 0; i < pending.length; i += batchSize) {
     const chunk = pending.slice(i, i + batchSize)
     if (pending.length > batchSize) log(`  배치 ${Math.floor(i / batchSize) + 1}/${Math.ceil(pending.length / batchSize)}: ${chunk.map((u) => u.key).join(', ')}`)
     const res = await pipeline(chunk, analyzeStage, verifyStage)
-    for (const r of res.filter(Boolean)) for (const f of r.findings) absorb(f, r.unit)
+    for (let j = 0; j < chunk.length; j++) {
+      const r = res[j]
+      if (!r || r.analyze_failed) {
+        analyzeFailed.push(chunk[j].key)
+        log(`  ⚠ analyze 실패: ${chunk[j].key} — 미커버(DEGRADED)`)
+        continue
+      }
+      coveredUnits.push(chunk[j].key)
+      // 하네스 자가감사(WSA-05, CONFIRMED) 수정: critic이 이전 라운드에서 analyze 실패했던 unit을
+      // unexplored_units로 재투입해 이번엔 성공하면, analyzeFailed에 남은 옛 등재를 지우지 않으면 같은 key가
+      // units_covered와 units_analyze_failed 양쪽에 실려 degraded가 과발화한다.
+      const afi = analyzeFailed.indexOf(chunk[j].key)
+      if (afi >= 0) analyzeFailed.splice(afi, 1)
+      for (const f of r.findings) absorb(f, r.unit)
+    }
   }
 
   pending = []
@@ -190,11 +228,17 @@ while (pending.length && round < maxRounds) {
       `Round ${round}`,
       CRITIC,
       criticModel,
-    ).catch(() => null)
+    ).catch(() => {
+      criticFailedCount++
+      log(`⚠ critic 호출 실패 — 완성도 재점검 미수행(DEGRADED)`)
+      return null
+    })
 
     if (cr) {
       // critic 산출물도 verify 재통과 — 무검증 채택 금지(§5)
-      const fresh = (cr.missed_findings || []).filter((f) => !seen.has(keyOf(f)))
+      const missedAll = cr.missed_findings || []
+      const fresh = missedAll.filter((f) => !seen.has(keyOf(f)))
+      dedupSkipped += missedAll.length - fresh.length
       fresh.forEach((f) => seen.add(keyOf(f)))
       if (fresh.length) {
         log(`critic이 새 finding ${fresh.length}건 → verify 재통과`)
@@ -214,18 +258,23 @@ degraded.sort((a, b) => (rank[a.final_severity] ?? 9) - (rank[b.final_severity] 
 
 // LOOP CONTRACT: degraded(verify 실패)가 1건이라도 있으면 결과는 DEGRADED — 위임자는 낙관 top-line을 보류한다.
 if (degraded.length) log(`⚠ DEGRADED: ${degraded.length}건이 verify 실패로 미검증 — confirmed로 세지 않음. 낙관 결론 보류 권장.`)
+if (analyzeFailed.length) log(`⚠ DEGRADED: analyze 실패 ${analyzeFailed.length}개 단위 미커버(units_analyze_failed) — 낙관 결론 보류 권장.`)
 if (pending.length) log(`⚠ 미탐색 단위 ${pending.length}개 남음(maxRounds 도달) → units_deferred`)
 
 return {
   rounds: round,
-  degraded: degraded.length > 0, // true면 verify 부분실패 — 낙관 결론 relay 금지(green≠작동)
+  degraded: degraded.length > 0 || analyzeFailed.length > 0 || criticFailedCount > 0, // true면 verify/analyze/critic 부분실패 — 낙관 결론 relay 금지(green≠작동)
+  critic_failed: criticFailedCount > 0,
   incomplete_coverage: pending.length > 0, // true면 critic이 반환한 단위를 maxRounds로 다 못 봄
   units_covered: coveredUnits,
+  units_analyze_failed: analyzeFailed, // analyze 실패로 커버리지에서 제외된 unit.key(H1 — 위장 covered 방지)
   units_deferred: pending.map((u) => u.key),
   counts: {
     confirmed: confirmed.length,
     refuted: refuted.length,
     verify_failed: degraded.length,
+    reviewer_fallbacks: reviewerFallbacks,
+    dedup_skipped: dedupSkipped,
     by_verdict: {
       verified: confirmed.filter((f) => f.verify_state === 'confirmed').length,
       adjusted: confirmed.filter((f) => f.verify_state === 'adjust').length,

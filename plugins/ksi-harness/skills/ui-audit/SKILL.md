@@ -10,9 +10,9 @@ when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 �
 
 ## 0. 재사용 루프 골격 (매번 0에서 재조립 금지 — codebase-audit §0.5의 픽셀판)
 감사·adversarial verify·완성도 critic 루프는 `~/.claude/workflows/audit-loop.js`(saved workflow)를 재사용 — codebase-audit과 **같은 골격**을 픽셀 감사에 쓴다. **캡처(§2)는 골격 밖에서 먼저** 하고, units에 페이지/차원별 프롬프트 + 스크린샷 경로를 넘긴다.
-`Workflow({scriptPath: '~/.claude/workflows/audit-loop.js', args: {units:[{key,prompt}], context, verifySeverities, maxRounds, analyzeModel}})`
-- **루프 의미론(트리거·survivor·정지·degraded·폴백)의 SSOT = audit-loop.js 상단 LOOP CONTRACT 주석** — 여기서 재명세하지 않는다(산문↔코드 drift 차단). dial: verifySeverities(기본 critical/high)·maxRounds(기본 2·천장 4)·analyzeModel(기본 sonnet).
-- **티어링(픽셀판):** 캡처·인벤토리=haiku(scout/Explore) · 시각 감사=`model:'sonnet'` · **발견성·역할게이팅·흐름단절 등 맥락추론 렌즈=`model:'opus'`** · verify/critic=reviewer(LOOP CONTRACT) · 종합=메인. 모델 배치 일반 규칙은 CLAUDE.md 참조. 맥락추론 렌즈의 opus 라우팅은 저 miss-cost라도 기본 유지 — sonnet 기본화(비용↓)는 `paired-run` 스팟체크로 검증 후(빈/희박 상태를 '못 찾아 비었다'와 혼동할 위험).
+`Workflow({scriptPath: '~/.claude/workflows/audit-loop.js', args: {units:[{key,prompt,model?}], context, verifySeverities, maxRounds, analyzeModel, batchSize, critic}})`
+- **루프 의미론(트리거·survivor·정지·degraded·폴백)의 SSOT = audit-loop.js 상단 LOOP CONTRACT 주석** — 여기서 재명세하지 않는다(산문↔코드 drift 차단). dial: verifySeverities·maxRounds·analyzeModel·batchSize(rate-limit cascade 예방 — §6 DEGRADED 경고와 연결)·critic(소규모 감사는 false로 생략)(기본값 SSOT=audit-loop.js LOOP CONTRACT — 여기 수치는 편의 표기).
+- **티어링(픽셀판):** 캡처·인벤토리=haiku(scout/Explore) · 시각 감사=`model:'sonnet'` · **발견성·역할게이팅·흐름단절 등 맥락추론 렌즈=`model:'opus'`**(해당 unit에 `model:'opus'`를 지정하는 것이 canonical 호출 — 미지정 unit은 analyzeModel 폴백) · verify/critic=reviewer(LOOP CONTRACT) · 종합=메인. 모델 배치 일반 규칙은 CLAUDE.md 참조. **(Sonnet 5세대 기준)** 맥락추론 렌즈의 opus 라우팅은 **미변경** — sonnet 기본화(비용↓)는 paired-run 스팟체크 후 결정(과거 '빈 보고서 첫인상' 회귀 선례상 신중. 재검토 TTL: 분기 1회 paired-run 재실측).
 - **context에 design-side spec을 반드시 넣는다** — UX목표 5축(페르소나·동선 step-budget·상태 인벤토리·마이크로카피 SSOT·접근성 예산 = CLAUDE.md 작업방식 SSOT). 기준 없는 시각 감사는 '안 깨졌나'만 잰다.
 
 ## 절차
@@ -35,12 +35,12 @@ when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 �
    - **발견성/콜드스타트:** 핵심 산출물(리포트·결과)이 nav에서 도달 가능한가 · 신규/각 역할이 길을 잃나 · 클릭하면 리다이렉트되는 죽은 메뉴는 없나 · 기능이 '만든 사람 머릿속' 위치(예: 산출물이 관리 메뉴 깊숙이)에 묻혀 있나. (화면 안 깨졌어도 도달 못 하면 결함)
    - **흐름 마찰(시각 너머):** 핵심 잡(생성→검수→최종화→산출물)을 몇 단계·클릭에 끝내나 · 중복 경로 · 숨은 1차 CTA · 되돌리기 없는 위험 동작. **단계 예산 초과는 화면이 안 깨졌어도 결함**(design-side spec의 step-budget 대비).
    - **에러·복구·엣지('green≠작동'의 UI판):** parse 실패·필수값 누락·권한 차단·finalize 잠금에서 사용자가 막히지 않고 빠져나오나 · 에러 메시지가 raw 키/영어/HTTP코드가 아니라 사람 말인가 · 미리 최종화된 픽스처가 아니라 실제 상태(빈/생성중/실패)가 렌더되나.
-   - **용어 SSOT·마이크로카피:** 같은 개념이 화면마다 다른 라벨로 새지 않나 — **라벨 SSOT 파일(labels.ts 등)을 스크린샷과 함께 Read해 실제 표기와 대조** · 내부코드(group_code·reason_code 등)·영어 잔존 노출 · 빈 상태 문구가 다음 행동을 안내하나. (예: 이중 분류 SSOT 모순·영어 raw 에러가 이 렌즈에서 드러난다.)
+   - **용어 SSOT·마이크로카피:** 같은 개념이 화면마다 다른 라벨로 새지 않나 — **라벨 SSOT 파일(labels.ts 등)을 스크린샷과 함께 Read해 실제 표기와 대조** · 내부코드(group_code·reason_code 등)·영어 잔존 노출 · 빈 상태 문구가 다음 행동을 안내하나. (실제 프로젝트에서 이중 분류 SSOT 모순·영어 raw 에러가 이 렌즈에서 나온 선례가 있다.)
    - 정렬·간격 드리프트, 이모지 vs 아이콘 혼용 등 일관성
    - *(시각 렌즈 외 맥락추론 렌즈 — 발견성·흐름마찰·에러복구 — 는 §0 티어링대로 opus로 라우팅)*
 
-4. **adversarial 검증 + 완성도 critic → 재투입** — 각 critical/high finding(기본 — dial로 확장)을 *다른* 에이전트(**`reviewer` tier** — opus·xhigh·read-only)가 같은 스크린샷으로 반증 시도(거짓양성·과장 제거). 살아남은 것만 채택. 인터랙티브 경로는 Task로 `subagent_type: reviewer` spawn.
-   - **완성도 critic(reviewer):** 안 본 페이지·뷰포트·역할·빈/초과 상태가 남았나 1패스 재점검. **critic이 낸 새 결함도 위 adversarial verify를 한 번 더 통과시켜 채택**(critic 산출물 무검증 통과 금지), 남은 게 있고 상한(2패스) 내면 재캡처·재감사. codebase-audit §5와 대칭의 수렴 루프 — ui-audit이 선형이라 빠졌던 단계.
+4. **adversarial 검증 + 완성도 critic → 재투입** — 각 critical/high finding(기본 — dial로 확장)을 *다른* 에이전트(**`reviewer` tier** — opus·xhigh·**구조적 read-only**: Bash 포함 write 계열 전부 tool 목록에서 제거, 상세는 reviewer.md frontmatter가 SSOT)가 같은 스크린샷으로 반증 시도(거짓양성·과장 제거). 살아남은 것만 채택. 인터랙티브 경로는 Task로 `subagent_type: reviewer` spawn.
+   - **완성도 critic(reviewer):** 안 본 페이지·뷰포트·역할·빈/초과 상태가 남았나 1패스 재점검. **critic이 낸 새 결함도 위 adversarial verify를 한 번 더 통과시켜 채택**(critic 산출물 무검증 통과 금지), 남은 게 있고 상한(maxRounds, 기본값 SSOT=audit-loop.js LOOP CONTRACT) 내면 재캡처·재감사. codebase-audit §5와 대칭의 수렴 루프 — ui-audit이 선형이라 빠졌던 단계.
    - **실행형 골격:** 감사·verify·critic 루프는 `~/.claude/workflows/audit-loop.js` 재사용(units=페이지/차원별 프롬프트+스크린샷 경로, context=design-side spec+제품 맥락). 캡처(§2)는 골격 밖에서 먼저.
 
 5. **구조적 처방** — 여러 페이지에 반복되는 결함은 페이지별 땜질이 아니라 **공유 프리미티브로 한 번에**: `PageHeader` / `ResponsiveTable`(모바일 reflow) / `EmptyState` / 라벨 맵(SSOT). 일관성을 노력이 아니라 구조로 강제.

@@ -13,4 +13,4 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - **되돌리기 어려운 작업(대량 삭제·`git push`·배포·외부 전송 등)은 실행하지 않는다** — dangerous mode라 권한이 닿아도 경량 잡일 tier의 범위를 벗어난다. 그런 지시를 받으면 실행하지 말고 보고한 뒤 멈춰 메인에 맡긴다.
 - 빠르고 정확하게. 출력은 위임자에게 돌려줄 데이터로 간결히(무엇을 했는지 + 결과).
 
-**의도된 한계 (규율 의존):** reviewer는 tools에서 Edit/Write를 *빼* read-only를 **구조로** 보장하지만, scout는 비코드 쓰기(md·json/yaml·픽스처)가 정당해 Edit/Write를 **보유**한다 — 따라서 "코드 파일 미수정"은 위 프롬프트 규율로만 강제되며 구조적 차단은 없다(Haiku tier라 위반 위험은 낮지만 0은 아니다). 그러므로 위임자(worker/메인)는 **scout 산출물을 diff로 확인**하고, 코드 파일(.py/.ts/.tsx 등) 변경이 섞였으면 되돌린다. (구조적 차단이 필요하면 PostToolUse 훅으로 scout의 코드파일 Edit를 막는 것이 근본책 — 현재는 미배선.)
+**의도된 한계 (규율 의존):** reviewer는 Bash 포함 write 계열 전부를 tools에서 빼 구조적 read-only가 됐지만(reviewer.md 참조), scout는 비코드 쓰기(md·json/yaml·픽스처)가 정당해 Edit/Write를 **보유**한다 — 따라서 "코드 파일 미수정"은 위 프롬프트 규율로만 강제되며 구조적 차단은 없다(Haiku tier라 이를 어길 위험은 낮지만 0은 아니다). 그러므로 위임자(worker/메인)는 **scout 산출물을 diff로 확인**하고, 코드 파일(.py/.ts/.tsx 등) 변경이 섞였으면 되돌린다. (구조적 차단이 필요하면 PostToolUse 훅으로 scout의 코드파일 Edit를 막는 것이 근본책 — 현재는 미배선. 단 scout도 Bash를 보유하므로 훅은 Edit뿐 아니라 **Bash 경유 코드 파일 쓰기(리다이렉트·here-doc 등)도 함께 검사**해야 한다.)

@@ -73,7 +73,7 @@ if not is_excluded:
         if re.search(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}", text):
             hits.append("JWT(서명 토큰 — service_role 의심)")
         ENVREF = re.compile(r"(process\.env|os\.environ|getenv|import\.meta\.env|\$\{|<[^>]{1,40}>|your[_-]|x{3,}|changeme|example|placeholder|dummy|fake|test[_-]?key|\*\*\*|\.\.\.)", re.I)
-        for m in re.finditer(r"(?i)\b(password|passwd|secret|api[_-]?key|access[_-]?key|client[_-]?secret|auth[_-]?token|private[_-]?key)\b\s*[:=]\s*[\x22\x27]([^\x22\x27\n]{8,})[\x22\x27]", text):
+        for m in re.finditer(r"(?i)(?<![A-Za-z0-9])(password|passwd|secret[_-]?key|secret|api[_-]?key|access[_-]?key|client[_-]?secret|auth[_-]?token|private[_-]?key)(?![A-Za-z0-9])\s*[:=]\s*[\x22\x27]([^\x22\x27\n]{8,})[\x22\x27]", text):
             if not ENVREF.search(m.group(2)):
                 hits.append("하드코딩된 " + m.group(1) + " 값")
                 break
@@ -99,7 +99,7 @@ if not is_excluded:
                 msg = "파괴적 마이그레이션 DDL: " + ", ".join(ddl) + "."
                 if not re.search(r"(?i)(downgrade|rollback|def down|-- *down)", text):
                     msg += " 롤백/downgrade 경로가 안 보입니다."
-                msg += " 마이그레이션=되돌리기 어려운 작업(자율성 게이트 1): 롤백·다운타임·기존데이터 영향을 확인하세요."
+                msg += " 마이그레이션=되돌리기 어려운 작업(자율성 게이트 1): 롤백·다운타임·기존데이터 영향을 확인하세요. → 롤아웃·롤백·blast radius 점검은 /release-risk"
                 findings.append(msg)
 
 if not findings:

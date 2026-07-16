@@ -1,7 +1,7 @@
 export const meta = {
   name: 'paired-run',
   description: '재사용 tier-검증 골격 — 같은 unit을 challenger(기본 sonnet)·reference(기본 opus) 두 tier로 동일 프롬프트 분석 → reviewer가 gap을 diff하되 reference-only finding을 코드로 재검증(환각 크레딧 차단)해 진짜 recall gap만 집계. model 출시마다 "tier X가 렌즈 Z에서 tier Y를 대체하나"를 싸게 답한다.',
-  whenToUse: '새 model 출시·tier 배치 재검토 시. audit-loop(버그 발견)과 shape가 다른 tier-라우팅 검증 골격 — units(키+프롬프트)+context(렌즈 spec)만 넘긴다. 단일 파일 조회엔 오버킬.',
+  whenToUse: '새 model 출시·tier 배치 재검토 시. audit-loop(버그 발견)과 shape가 다른 tier-라우팅 검증 골격 — units(키+프롬프트)+context(렌즈 spec)만 넘긴다. 단일 파일 조회엔 오버킬. 비-ultracode 세션에선 analyze가 세션 effort를 상속해 reference(opus)가 xhigh 미만으로 돌 수 있음 — ultracode 세션 권장.',
   phases: [
     { title: 'PairedAnalyze', detail: 'same unit을 challenger·reference가 동일 프롬프트로(통제 비교)' },
     { title: 'GapDiff', detail: 'reviewer가 두 set diff + reference-only 실재 재검증(환각 제외)' },
@@ -14,6 +14,7 @@ export const meta = {
 //  verdict/unit  = challenger_sufficient(실재 reference-only 0 또는 low만) · minor_gap(medium 이하) · material_gap(critical/high를 challenger가 놓침).
 //  aggregate     = 최악 unit verdict. material 하나라도면 그 렌즈는 reference 유지가 정답.
 //  통제(핵심)     = challenger/reference는 **model만** 다르고 프롬프트·context·schema는 동일. 이게 깨지면 비교가 아니라 잡음이다.
+//  model ID 예외  = 기본은 alias만(challengerModel/referenceModel, 풀 ID 금지). version-pin이 필요한 신구버전 A/B 비교(예: 특정 모델 스냅샷 간 비교)는 예외적으로 풀 모델 ID 허용.
 //  effort        = analyze는 inline agent라 세션 effort를 상속(ultracode면 기본 sonnet/opus 쌍은 양쪽 다 xhigh = 동일 조건. 단 challenger가 xhigh 미지원 tier[haiku·pre-5 Sonnet]면 effort 통제가 깨짐). gap-diff는 reviewer(opus·xhigh·read-only, 부재 시 opus 폴백).
 //  왜 reviewer로 diff = producer(challenger/reference)와 다른 skeptic이 있어야 reference 환각·과장을 걸러 gap을 정직하게 잰다(cross-model error-decorrelation). challenger로 diff하면 correlated blind spot.
 //  한계          = 스팟체크지 벤치마크 아님(n=units·1회). verdict는 방향 신호 — caveat을 결과에 동봉해 과신을 막는다.
@@ -109,6 +110,9 @@ const fmt = (set) =>
 phase('PairedAnalyze')
 log(`paired-run: ${units.length}개 unit × {challenger=${challengerModel}, reference=${referenceModel}} · 렌즈=${lens}`)
 
+// H2: challenger/reference 중 한쪽만 실패한 unit은 gap-diff를 skip하고 여기로 격리(DEGRADED) — 침묵 진행 금지.
+const failedUnits = []
+
 // canonical no-barrier: unit별로 challenger·reference 분석이 끝나는 즉시 그 unit의 gap-diff가 돈다.
 const perUnit = (
   await pipeline(
@@ -121,7 +125,15 @@ const perUnit = (
       return { key: u.key, challenger: c, reference: r }
     },
     async (res) => {
-      if (!res || (!res.challenger && !res.reference)) return null
+      if (!res) return null
+      const cFail = !res.challenger
+      const rFail = !res.reference
+      if (cFail || rFail) {
+        const failed_side = cFail && rFail ? 'both' : cFail ? 'challenger' : 'reference'
+        failedUnits.push({ unit: res.key, failed_side })
+        log(`⚠ ${res.key}: ${failed_side} 분석 실패 — gap-diff 스킵(DEGRADED)`)
+        return null
+      }
       const prompt = `${CTX}
 
 ## paired-run gap diff — unit "${res.key}" · 렌즈: ${lens}
@@ -134,12 +146,32 @@ ${fmt(res.challenger)}
 ${fmt(res.reference)}
 
 두 set을 semantic하게 대조(제목이 달라도 같은 결함이면 겹침으로 본다). reference_only 후보를 실제로 재확인 → 실재=reference_only_real, 환각/과장=reference_only_hallucinated. verdict = 실재하는 reference_only의 최고 심각도 기준(critical/high면 material_gap · medium이면 minor_gap · 없거나 low만이면 challenger_sufficient).`
-      return reviewAgent(prompt, `gapdiff:${res.key}`, 'GapDiff', GAP)
+      const g = await reviewAgent(prompt, `gapdiff:${res.key}`, 'GapDiff', GAP)
+      if (!g) {
+        // 하네스 자가감사(WSA-01, CONFIRMED) 수정: gap-diff 실패를 failedUnits에 넣지 않고 그냥
+        // null 반환하던 silent drop — degraded=false로 남아 tier-downgrade 판정에서 미검증 unit이 은폐될 수
+        // 있었다. analyze 편측 실패와 동일하게 DEGRADED 격리.
+        failedUnits.push({ unit: res.key, failed_side: 'gapdiff' })
+        log(`⚠ ${res.key}: gap-diff 실패 — DEGRADED(미검증, challenger_sufficient로 세지 않음)`)
+        return null
+      }
+      // verdict는 reviewer 자기보고를 신뢰하지 않고 reference_only_real의 severity로 JS에서 결정적으로 재계산(unit 키도 강제 주입).
+      const realSeverities = (g.reference_only_real || []).map((f) => f.severity)
+      const verdict = realSeverities.includes('critical') || realSeverities.includes('high')
+        ? 'material_gap'
+        : realSeverities.includes('medium')
+          ? 'minor_gap'
+          : 'challenger_sufficient'
+      if (g.verdict && g.verdict !== verdict) {
+        log(`⚠ ${res.key}: reviewer 자기보고 verdict(${g.verdict}) ≠ severity 재계산(${verdict}) — 재계산값 채택`)
+      }
+      return { ...g, unit: res.key, model_verdict: g.verdict, verdict }
     },
   )
 ).filter(Boolean)
 
 // aggregate = 최악 verdict. material 하나라도면 그 렌즈는 reference 유지.
+// perUnit은 이미 failedUnits(편측 실패)를 제외한 성공 gap-diff만 담고 있으므로, 실패 unit이 challenger_sufficient로 잘못 세어질 편향이 없다.
 const rank = { material_gap: 0, minor_gap: 1, challenger_sufficient: 2 }
 const worst = perUnit.length ? perUnit.reduce((w, g) => (rank[g.verdict] < rank[w] ? g.verdict : w), 'challenger_sufficient') : null
 const recommendation =
@@ -153,6 +185,7 @@ const recommendation =
 
 const halluc = perUnit.reduce((n, g) => n + (g.reference_only_hallucinated || []).length, 0)
 if (halluc) log(`※ reference가 낸 것 중 ${halluc}건이 재검증서 환각/과장으로 걸러짐 — 그만큼 gap을 부풀리지 않음(정상).`)
+if (failedUnits.length) log(`⚠ DEGRADED: ${failedUnits.length}개 unit이 편측/양측 분석 실패 또는 gap-diff 자체 실패로 제외됨 — aggregate_verdict에 반영되지 않음.`)
 log(`aggregate: ${worst} — ${recommendation}`)
 
 return {
@@ -161,7 +194,9 @@ return {
   reference: referenceModel,
   aggregate_verdict: worst,
   recommendation,
-  caveat: `스팟체크 — n=${units.length} unit·1회 실행. verdict는 방향 신호지 벤치마크 아님(labeled set + precision/recall이 아님). 다른 대상/렌즈로 재확인 시 신뢰 상승.`,
+  degraded: failedUnits.length > 0,
+  failed_units: failedUnits,
+  caveat: `스팟체크 — n=${perUnit.length} unit(요청 ${units.length}건 중 분석 완료)·1회 실행. verdict는 방향 신호지 벤치마크 아님(labeled set + precision/recall이 아님). 다른 대상/렌즈로 재확인 시 신뢰 상승.`,
   reference_hallucinated_count: halluc,
   per_unit: perUnit,
 }

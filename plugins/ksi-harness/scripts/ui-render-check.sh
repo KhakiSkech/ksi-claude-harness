@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
-# Stop hook: 이 세션에서 프론트엔드 화면 파일(.tsx/.jsx/.vue/.svelte)을 '직접' 수정했는데
+# Stop hook: 이 세션에서 프론트엔드 화면 파일(.tsx/.jsx/.vue/.svelte/.css/.scss — 실제 EXTS는 코드가 SSOT)을 '직접' 수정했는데
 # '완료'하려 할 때, 렌더를 실제로 봤는지 1회 넛지한다(시각 검증 게이트의 프론트 대응물).
 # - 3-훅 게이트 대칭: 백엔드=정적 lint(ruff, 자동 주입)+동작 넛지(backend-verify, Stop) / 프론트=시각+동선 넛지(이 훅, Stop).
-# - 발화 조건 = '이 세션 transcript의 Edit/Write/MultiEdit' ∩ 'git 미커밋 프론트 변경'.
-#   ① transcript: 메인 루프 직접 편집 + 이 세션의 서브에이전트/workflow 편집.
+# - 핵심: 막는 조건 = '이 세션 transcript의 Edit/Write/MultiEdit' ∩ 'git 미커밋 프론트 변경'.
+#   ① transcript: 메인 루프 직접 편집 + 이 세션의 서브에이전트/workflow 편집(확장).
 #      서브에이전트 편집은 메인 transcript에 안 잡히므로(isSidechain 0개), 세션 사이드카
-#      <transcript_path 확장자 제거>/subagents/**/agent-*.jsonl 를 직접 스캔한다
-#      (fan-out으로 .tsx를 고치는 workflow 경로도 포착).
-#   ② git 교차: git diff HEAD + untracked 의 실제 미커밋 파일만 막는다 — 이미 커밋한 화면은 제외.
-#   ③ compaction 경계 보정: transcript jsonl은 compaction 후에도 같은 파일에 누적되므로,
-#      '마지막 compaction 경계(isCompactSummary 또는 compactMetadata 레코드) 이후'의 편집만 본다
-#      (요약으로 이어진 세션에서 이전 세션 편집이 매 턴 오발하는 것을 방지).
+#      <transcript_path 확장자 제거>/subagents/**/agent-*.jsonl 를 직접 스캔한다 — fan-out으로
+#      .tsx를 고치는 핵심 운영경로(workflow 기본)에서 영영 침묵하던 구조적 거짓음성을 봉합.
+#   ② git 교차(추가): git diff HEAD + untracked 에 실제 미커밋인 파일만 막는다 —
+#      이미 커밋한 과거 화면은 제외. 구버전은 transcript만 봐서, 긴 세션에서 커밋 끝난 화면이
+#      이후 모든 Stop마다 영구 오발했다(아래 ③ compaction 보정만으론 '요약 후 편집했지만
+#      이미 커밋한' 경우를 못 거른다 — git 교차가 그 구멍을 메운다).
+#   구버전이 봤던 git status(작업트리 전체)의 거짓양성(안 만진 화면 오발)도 함께 회피한다.
+# - 컨텍스트 요약(compaction) 보정(추가): transcript jsonl은 compaction 후에도
+#   같은 파일에 누적된다(이전 세션 기록이 그대로 남음). 따라서 '마지막 compaction 경계
+#   (isCompactSummary 또는 compactMetadata 레코드) 이후'의 편집만 본다. 이게 없으면
+#   요약으로 이어진 세션에서 이전 세션의 tsx 편집까지 잡혀 매 턴 오발한다(거짓양성).
 # - 루프 방지: stop_hook_active면 통과. transcript 없음/파싱 오류면 graceful 통과(세션 안 깸).
 set -uo pipefail
 
@@ -95,7 +100,7 @@ try:
 except Exception:
     sys.exit(0)
 
-# 3b) 이 세션의 서브에이전트/workflow 편집도 포함.
+# 3b) 이 세션의 서브에이전트/workflow 편집도 포함(추가).
 #     메인 transcript엔 서브에이전트 편집이 안 잡히므로(isSidechain 0개), 세션 사이드카
 #     디렉토리 <transcript_path 확장자 제거>/subagents/**/agent-*.jsonl 를 직접 스캔한다.
 #     이들은 '이 세션' 디렉토리에만 있어 cross-session 거짓양성이 구조적으로 없고,
@@ -162,6 +167,25 @@ changed = {os.path.normcase(os.path.normpath(p)) for p in changed} & uncommitted
 n = len(changed)
 if n == 0:
     sys.exit(0)
+
+# dedup (하네스 자가감사, CONFIRMED high): stop_hook_active는 같은 Stop 사이클 재진입만 막아
+# 마라톤 세션에서 동일 파일셋에 같은 보일러플레이트가 최대 106회 재주입됐다(실측). 키는 세션 1회가 아니라
+# '정렬된 fileset 해시' — 파일셋이 바뀌면(새 화면 편집) 정당하게 재넛지하고, 불변이면 침묵한다.
+# 추가로 세션당 하드캡 3회: 파일셋이 계속 바뀌는 마라톤에서도 같은 종류의 넛지가 스크롤백을 도배하지 않게.
+import hashlib, glob as _glob
+sid = d.get("session_id", "") or "nosession"
+fs_hash = hashlib.sha1("\n".join(sorted(changed)).encode()).hexdigest()[:8]
+sent_dir = f"/tmp/claude-{os.getuid()}"
+sent = f"{sent_dir}/uirender-nudge-{sid}-{fs_hash}"
+try:
+    os.makedirs(sent_dir, exist_ok=True)
+    if os.path.exists(sent):
+        sys.exit(0)
+    if len(_glob.glob(f"{sent_dir}/uirender-nudge-{sid}-*")) >= 3:
+        sys.exit(0)
+    open(sent, "w").close()
+except Exception:
+    pass
 
 reason = (
     "이 세션에서 프론트엔드 화면 파일 " + str(n) + "개를 수정했습니다. "

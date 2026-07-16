@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SessionStart hook: 진입한 프로젝트의 .claude/settings.json이 'active footgun'을 강제하는지 1줄 경고.
-# 점검: Claude를 비-Anthropic/로컬 엔드포인트로 강제하는 ANTHROPIC_BASE_URL, 강제 bypassPermissions,
-# 로컬/비-Claude 모델 매핑 잔존. 경고만(자동수정 없음 — update-check 훅과 동형 SessionStart 이벤트).
-# 동기: 프로젝트별 settings가 세션을 조용히 깨거나(죽은 엔드포인트) 권한확인을 우회시키는 사고를 진입 시점에 가시화.
+# 점검: 죽은 ANTHROPIC_BASE_URL(ollama/localhost:11434 — 로컬 LLM 미사용 SSOT 위반), 강제 bypassPermissions,
+# 로컬 모델 매핑 잔존. 경고만(자동수정 없음 — 레포의 update-check 훅과 동형, 우리가 안 쓰던 SessionStart 이벤트).
+# 근거: 메타감사가 어느 프로젝트의 .claude/settings.json을 'Claude를 죽은 ollama:11434로 강제 + bypass'로 적발(active footgun).
 set -uo pipefail
 
 input="$(cat)"
@@ -26,20 +26,20 @@ env = d.get("env") or {}
 base = str(env.get("ANTHROPIC_BASE_URL", "") or "")
 low = base.lower()
 if base and ("11434" in base or "ollama" in low or "localhost" in low or "127.0.0.1" in base):
-    issues.append("ANTHROPIC_BASE_URL=%s → Claude 호출을 로컬/외부 엔드포인트로 강제(엔드포인트가 죽었거나 의도치 않으면 세션이 조용히 깨짐)" % base)
+    issues.append("ANTHROPIC_BASE_URL=%s → 죽은 로컬 LLM 엔드포인트로 강제(로컬 LLM 미사용 SSOT 위반 — Claude 호출이 실패하거나 엉뚱한 곳으로 감)" % base)
 perms = d.get("permissions") or {}
 if perms.get("defaultMode") == "bypassPermissions":
-    issues.append("permissions.defaultMode=bypassPermissions 강제(프로젝트 진입만으로 권한확인 우회)")
+    issues.append("permissions.defaultMode=bypassPermissions 강제(프로젝트 진입만으로 권한확인 우회 — 의도된 ksi 흐름이 아님)")
 models = []
 for v in (env.get("ANTHROPIC_MODEL", ""), env.get("ANTHROPIC_SMALL_FAST_MODEL", ""), d.get("model", "")):
     s = str(v or "").lower()
     if s and any(t in s for t in ("ollama", "qwen", "nemotron", "llama", "gemma", "mistral", "/local")):
         models.append(str(v))
 if models:
-    issues.append("비-Claude/로컬 모델 매핑 잔존: %s" % ", ".join(models))
+    issues.append("로컬 모델 매핑 잔존: %s" % ", ".join(models))
 if issues:
-    print("⚠ 설정 경고 — 이 프로젝트 `.claude/settings.json`:\n- " + "\n- ".join(issues)
-          + "\n(이 설정은 세션을 깨거나 권한확인을 우회시킬 수 있음 — 의도된 것인지 확인하세요.)")
+    print("⚠ 死config 경고 — 이 프로젝트 `.claude/settings.json`:\n- " + "\n- ".join(issues)
+          + "\n(전역 doctrine: 로컬 LLM은 하네스 용도로 쓰지 않는다. 이 설정은 세션을 깨거나 권한을 우회시킬 수 있음 — 제거를 권장.)")
 ' 2>/dev/null)"
 
 [ -z "$warn" ] && exit 0

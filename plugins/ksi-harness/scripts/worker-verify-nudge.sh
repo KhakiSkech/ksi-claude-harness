@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# SubagentStop hook (matcher: worker): worker 서브에이전트가 끝나면 "산출물을 self-report로 신뢰하지
+# 말고 reviewer로 adversarial 검증하라"를 1줄 상기시킨다. 비차단(additionalContext만, decision:block 안 씀) —
+# 사소한 worker 위임(트리거 어휘 붙이기 등)까지 매번 막으면 gate-nudge가 겪은 피로·crying-wolf를 재현한다.
+# 근거: 하네스 자가감사 — SubagentStop 훅 이벤트가 worker→reviewer 핸드오프를 구조적으로
+#       넛지할 수 있는데 미배선이었음(audit-loop.js 같은 워크플로 경로는 verify가 이미 코드에 baked-in되지만,
+#       인터랙티브 Agent 스폰 경로는 넛지가 전무했다).
+set -uo pipefail
+
+input="$(cat)"
+out="$(HOOK_INPUT="$input" python3 - <<'PY' 2>/dev/null
+import json, os, sys
+
+try:
+    d = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
+except Exception:
+    sys.exit(0)
+
+agent_type = d.get("agent_type", "") or ""
+if agent_type != "worker":
+    sys.exit(0)
+
+# dedup (자가감사 critic 적발): 이 훅 자신이 신설 당일 'Stop 훅 dedup 부재'와 같은 결함을 갖고
+# 있었다 — worker fan-out 세션에서 worker가 끝날 때마다 같은 문단이 재주입됨. 넛지는 세션당 1회면 충분
+# (일반 원칙 리마인더라 fileset 키가 없음 — gate-nudge와 동형의 세션 sentinel).
+sid = d.get("session_id", "") or "nosession"
+sent = f"/tmp/claude-{os.getuid()}/workernudge-{sid}"
+try:
+    os.makedirs(os.path.dirname(sent), exist_ok=True)
+    if os.path.exists(sent):
+        sys.exit(0)
+    open(sent, "w").close()
+except Exception:
+    pass
+
+msg = (
+    "worker 산출물입니다(SubagentStop 넛지, 비차단): 코드 변경이 있었다면 완료로 간주하기 전 reviewer로 "
+    "adversarial 검증하세요 — self-report(\"완료/테스트통과\")를 그대로 믿지 말고 실제 근거를 재확인해야 합니다."
+)
+print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStop", "additionalContext": msg}}, ensure_ascii=False))
+PY
+)"
+[ -n "${out:-}" ] && printf '%s\n' "$out"
+exit 0

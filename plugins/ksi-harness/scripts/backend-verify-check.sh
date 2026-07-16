@@ -159,10 +159,10 @@ def _is_interesting(p):
     base_name = os.path.basename(norm)
     if base_name.startswith("test_") or base_name.endswith("_test.py"):
         return True
-    for seg in ("/tests/", "/alembic/", "/migrations/", "/services/", "/crud/", "/repositories/"):
+    for seg in ("/tests/", "/alembic/", "/migrations/", "/services/", "/crud/", "/repositories/", "/routers/", "/endpoints/"):
         if seg in norm:
             return True
-    if base_name in ("main.py", "conftest.py", "models.py", "crud.py", "service.py"):
+    if base_name in ("main.py", "conftest.py", "models.py", "crud.py", "service.py", "router.py", "routes.py"):
         return True
     return False
 
@@ -172,13 +172,30 @@ n = len(interesting)
 if n == 0:
     sys.exit(0)
 
+# dedup (하네스 자가감사, CONFIRMED high): 동일 파일셋 반복 재넛지 차단 — ui-render-check와 동형.
+# 키=정렬 fileset 해시(셋 변경 시 재넛지) + 세션당 하드캡 3회. 상세 근거는 ui-render-check.sh 주석 참조.
+import hashlib, glob as _glob
+sid = d.get("session_id", "") or "nosession"
+fs_hash = hashlib.sha1("\n".join(sorted(interesting)).encode()).hexdigest()[:8]
+sent_dir = f"/tmp/claude-{os.getuid()}"
+sent = f"{sent_dir}/backendverify-nudge-{sid}-{fs_hash}"
+try:
+    os.makedirs(sent_dir, exist_ok=True)
+    if os.path.exists(sent):
+        sys.exit(0)
+    if len(_glob.glob(f"{sent_dir}/backendverify-nudge-{sid}-*")) >= 3:
+        sys.exit(0)
+    open(sent, "w").close()
+except Exception:
+    pass
+
 reason = (
     "이 세션에서 백엔드 상태전이/테스트 파일 " + str(n) + "개를 수정했습니다(tests·migrations·services 등). "
     "\"완료\" 전에 'green ≠ 작동'을 점검하세요(ruff lint 통과는 동작 검증이 아닙니다): "
     "① 캐시 클린 후 재실행으로 green을 재현했나(예: pytest -p no:cacheprovider 또는 .pytest_cache·.mypy_cache 제거 후) — "
     "incremental 캐시가 중간 상태로 가짜 green을 낼 수 있습니다. "
-    "② 핵심 사용자 여정을 미리 완료 처리된 픽스처가 아니라 실제 상태 전이(생성→…→완료→결과물)로 적어도 한 번 통과시켰나 — "
-    "시드가 완료 플래그·집계값을 직접 주입하면 깨진 완료 경로도 green이 됩니다. "
+    "② 핵심 사용자 여정을 미리 최종화된 픽스처가 아니라 실제 상태 전이(생성→…→finalize→산출물)로 적어도 한 번 통과시켰나 — "
+    "시드가 status=finalized·점수를 직접 주입하면 깨진 finalize도 green이 됩니다. "
     "③ SQLite로 테스트하고 프로덕션이 다른 DB(PG 등)면 dialect 분기(INTERVAL·now()·JSON 등)가 프로덕션에서도 도나. "
     "이미 위를 확인했다면 그 사실을 보고하고 그대로 완료하세요. 깊은 점검은 /codebase-audit의 '핵심 여정 실행성' 렌즈로. "
     "ruff/타입 통과는 동작 정확성을 보장하지 않습니다."

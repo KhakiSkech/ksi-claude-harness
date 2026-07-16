@@ -62,6 +62,17 @@ elif [ "$eco" = node ]; then
 fi
 
 [ "${rc:-0}" -eq 0 ] && exit 0   # 취약점 없음(또는 high 미만)
+
+# 도구 자체 오류(네트워크 단절·resolution 실패 등)는 취약점 발견이 아니다 — 오프라인마다 거짓 배포 블로커로
+# 오표기되는 것을 막는다. 좁은 마커셋만 걸러 진짜 advisory까지 "도구 오류"로 강등시키지 않는다.
+if printf '%s' "$out" | grep -qiE 'ERROR:pip|npm error|audit endpoint returned an error|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|No matching distribution|Failed to (install|resolve|fetch)|Temporary failure in name resolution'; then
+  emit "⚠ SCA 미검증(도구 오류 — 취약점 아님) — ${file}:
+${out}
+
+pip-audit/npm audit 실행 자체가 실패했습니다(네트워크 단절·resolution 오류 등) — 취약점이 발견된 게 아니므로 배포 블로커가 아닙니다. 온라인 상태에서 재점검하세요."
+  exit 0
+fi
+
 emit "⚠ SCA(의존성 취약점) — ${file}:
 ${out}
 

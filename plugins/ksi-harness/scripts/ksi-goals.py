@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ksi-goals — durable goal-ledger 상태 헬퍼 (green≠작동의 멀티세션화).
 
-durable goal-ledger 패턴(이전 프로젝트의 ultragoal 접근을 포팅): 프로젝트별 .ksi/{goals.json(상태), ledger.jsonl(append-only 이벤트)}.
+OMX ultragoal 패턴 포팅: 프로젝트별 .ksi/{goals.json(상태), ledger.jsonl(append-only 이벤트)}.
 완료는 자기신고가 아니라 evidence gate(reviewer 검증) 통과로만 인정 — gate refuted면 in_progress 유지.
 완료가 나중에 조기였다고 드러나면 invalidate → false_positive_complete + 재오픈.
 
@@ -147,7 +147,7 @@ def build_parser():
     ab = sub.add_parser("abandon")
     ab.add_argument("--id", required=True)
     ab.add_argument("--reason", required=True)
-    # durable '프로젝트 두뇌'(nextgen 3순위): 모듈별 '무엇이 있나' 상태.
+    # durable '프로젝트 두뇌'(프로젝트 두뇌): 모듈별 '무엇이 있나' 상태.
     # goals=할 일, state=현황. audit 종점이 upsert(손편집 아님), git HEAD로 freshness.
     ss = sub.add_parser("state-set", help="모듈 상태 upsert(audit이 자동 호출) — green/risk/unknown")
     ss.add_argument("--module", required=True, help="경로/모듈명(예: backend/payments)")
@@ -157,7 +157,97 @@ def build_parser():
     sh = sub.add_parser("state-show", help="프로젝트 두뇌 렌더 + freshness(git HEAD 대비)")
     sh.add_argument("--json", action="store_true")
     sh.add_argument("--brief", action="store_true")
+    # risk 레코드(제품 안전망 — risk lifecycle): goal과 lifecycle이 다르다 —
+    # risk는 fix(→goal)뿐 아니라 **accept(baseline로 수용, 근거 필수)**라는 종단이 있다.
+    # goals.json 안 risks[]로(같은 lock·save 재사용, 린함). completion 술어를 오염시키지 않게 분리.
+    ra = sub.add_parser("risk-add", help="제품 리스크 기록(open) — codebase-audit/release-risk 렌즈가 호출")
+    ra.add_argument("--id", required=True)
+    ra.add_argument("--title", required=True)
+    ra.add_argument("--lens", required=True, choices=["role", "economic", "gaming", "time-axis", "db", "secret", "other"])
+    ra.add_argument("--severity", required=True, choices=["critical", "high", "medium", "low"])
+    ra.add_argument("--note", default="")
+    rac = sub.add_parser("risk-accept", help="리스크를 baseline로 수용(근거 필수 — evidence-gate와 동형)")
+    rac.add_argument("--id", required=True)
+    rac.add_argument("--reason", required=True)
+    rr = sub.add_parser("risk-resolve", help="리스크 해소(증거 필수)")
+    rr.add_argument("--id", required=True)
+    rr.add_argument("--evidence-ref", required=True)
+    rro = sub.add_parser("risk-reopen", help="수용/해소된 리스크 재발(regression)")
+    rro.add_argument("--id", required=True)
+    rro.add_argument("--reason", required=True)
+    rl = sub.add_parser("risk-list", help="open + accepted 분리 렌더")
+    rl.add_argument("--json", action="store_true")
+    rl.add_argument("--brief", action="store_true")
     return p
+
+
+RISK_STATES = ("open", "accepted", "resolved", "regressed")
+RISK_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+
+def _risks(data):
+    return data.setdefault("risks", [])
+
+
+def _find_risk(data, rid):
+    for r in _risks(data):
+        if r["id"] == rid:
+            return r
+    return None
+
+
+def cmd_risk_add(data, gp, lp, args):
+    if _find_risk(data, args.id):
+        sys.exit(f"risk '{args.id}' 이미 존재")
+    _risks(data).append({
+        "id": args.id, "title": args.title, "lens": args.lens, "severity": args.severity,
+        "status": "open", "note": args.note, "accept_reason": None, "evidence_ref": None,
+        "created_at": now(), "updated_at": now(),
+    })
+    log(lp, "risk_add", args.id, lens=args.lens, severity=args.severity)
+    save(gp, data)
+    print(f"✓ risk 기록: {args.id} [{args.severity}/{args.lens}] (open — fix는 goal로 register, 수용은 risk-accept)")
+
+
+def _risk_transition(data, gp, lp, rid, to, *, reason=None, evidence=None):
+    r = _find_risk(data, rid)
+    if not r:
+        sys.exit(f"risk '{rid}' 없음")
+    r["status"] = to
+    r["updated_at"] = now()
+    if reason is not None:
+        r["accept_reason"] = reason
+    if evidence is not None:
+        r["evidence_ref"] = evidence
+    log(lp, f"risk_{to}", rid)
+    save(gp, data)
+    return r
+
+
+def cmd_risk_list(data, as_json, brief):
+    rs = _risks(data)
+    by = {s: [r for r in rs if r["status"] == s] for s in RISK_STATES}
+    if as_json:
+        print(json.dumps({"risks": rs, "open": len(by["open"]) + len(by["regressed"]),
+                          "accepted": len(by["accepted"]), "resolved": len(by["resolved"])}, ensure_ascii=False))
+        return
+    live = sorted(by["open"] + by["regressed"], key=lambda r: RISK_RANK.get(r["severity"], 9))
+    if brief:
+        parts = []
+        if live:
+            crit = sum(1 for r in live if r["severity"] in ("critical", "high"))
+            parts.append(f"⚠미해소 리스크 {len(live)}" + (f"(critical/high {crit})" if crit else ""))
+        if by["accepted"]:
+            parts.append(f"수용 {len(by['accepted'])}")
+        if parts:
+            print("제품 리스크: " + " · ".join(parts))
+        return
+    print(f"# 제품 리스크 (미해소 {len(live)} · 수용 {len(by['accepted'])} · 해소 {len(by['resolved'])})")
+    for r in live:
+        print(f"  [{r['severity']:8}/{r['lens']}] {r['id']} {r['title']} — {r.get('note', '')}"
+              + (" ↻regressed" if r["status"] == "regressed" else ""))
+    for r in by["accepted"]:
+        print(f"  [수용/{r['lens']}] {r['id']} {r['title']} — 근거: {r.get('accept_reason', '')}")
 
 
 def cmd_state_set(sp, d, module, status, note, audit_ref):
@@ -301,7 +391,7 @@ def main():
                 return
             project = args.project or os.path.basename(os.path.abspath(args.dir))
             log(lp, "init", project=project)
-            save(gp, {"version": 1, "project": project, "updated_at": now(), "goals": []})
+            save(gp, {"version": 1, "project": project, "updated_at": now(), "goals": [], "risks": []})
             print(f"✓ 초기화: {kdir}  (.gitignore에 넣지 말 것 — 목표 이력은 repo와 함께 커밋)")
             return
 
@@ -316,6 +406,25 @@ def main():
             return
         if args.cmd == "state-show":
             cmd_state_show(state_path(args.dir), args.dir, getattr(args, "json", False), args.brief)
+            return
+
+        if args.cmd == "risk-add":
+            cmd_risk_add(data, gp, lp, args)
+            return
+        if args.cmd == "risk-accept":
+            _risk_transition(data, gp, lp, args.id, "accepted", reason=args.reason)
+            print(f"✓ risk {args.id} 수용(baseline) — 근거: {args.reason}")
+            return
+        if args.cmd == "risk-resolve":
+            _risk_transition(data, gp, lp, args.id, "resolved", evidence=args.evidence_ref)
+            print(f"✓ risk {args.id} 해소 — 증거: {args.evidence_ref}")
+            return
+        if args.cmd == "risk-reopen":
+            _risk_transition(data, gp, lp, args.id, "regressed", reason=args.reason)
+            print(f"↻ risk {args.id} 재발(regression) — {args.reason}")
+            return
+        if args.cmd == "risk-list":
+            cmd_risk_list(data, getattr(args, "json", False), args.brief)
             return
 
         if args.cmd == "register":

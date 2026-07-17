@@ -2,7 +2,7 @@
 # SessionStart hook: 진입한 프로젝트에 .ksi/goals.json이 있으면 미완 goal을 1줄로 넛지.
 # 있을 때만 발화(opt-in 자동 — 원장 안 쓰는 프로젝트엔 무음). dead-config-guard와 동형.
 # 목적: 여러 프로젝트를 오갈 때 '어디까지 했나·뭐가 가짜완료로 재오픈됐나'를 진입 즉시 복원.
-# 확장(자가감사: 원장 채택률 저조 — 내구성 갭): .ksi는 없는데 docs/에 감사/백로그류 md가
+# 2026-07-16 확장(자가감사: 원장 채택 2/13 — 내구성 갭): .ksi는 없는데 docs/에 감사/백로그류 md가
 #   있으면(=추적할 상태가 있는데 원장 미채택) '/goals init 권장' 1줄 넛지를 추가. 이걸로 '전체 분석해줘'를
 #   매번 재분석하는 마찰을 원장 채택으로 유도(발화는 여전히 조건부 — 아무 근거 없는 프로젝트엔 무음).
 set -uo pipefail
@@ -30,10 +30,12 @@ print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","addition
     fi
     exit 0
   fi
-  # 프로젝트 두뇌(state.json)도 있으면 현황·freshness 1줄 덧붙임(nextgen 3순위).
+  # 프로젝트 두뇌(state.json)·미해소 리스크도 있으면 현황 1줄 덧붙임(2026-07-16 nextgen 3·6순위).
   sbrief="$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/ksi-goals.py" --dir "$cwd" state-show --brief 2>/dev/null)"
+  rbrief="$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/ksi-goals.py" --dir "$cwd" risk-list --brief 2>/dev/null)"
   full="$brief — /goals로 복원·이어가기"
   [ -n "$sbrief" ] && full="$full · $sbrief"
+  [ -n "$rbrief" ] && full="$full · $rbrief"
   WARN="$full" python3 -c '
 import os, json
 print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":os.environ["WARN"]}}))

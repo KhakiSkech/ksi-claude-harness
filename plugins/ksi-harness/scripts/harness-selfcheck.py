@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """하네스 자기측정 + correctness 스모크 — read-only.
 
-신설(nextgen 로드맵 1순위): 하네스가 자기 개입의 효과·비용·정확성을 스스로 재게 한다.
+2026-07-16 신설(nextgen 로드맵 1순위): 하네스가 자기 개입의 효과·비용·정확성을 스스로 재게 한다.
 기존 harness-cost-report.sh(tier 분포 heuristic)를 흡수·확장 — 이 스크립트가 상위집합이라 cost-report는 폐기 대상.
 
 두 서브커맨드:
@@ -25,13 +25,17 @@ from collections import Counter, defaultdict
 
 HOME = os.path.expanduser("~")
 PROJ_ROOT = os.path.join(HOME, ".claude", "projects")
-HOOKS_DIR = os.path.join(HOME, ".claude", "hooks")
+# native 머신은 ~/.claude/hooks, 플러그인 설치 머신은 훅이 ${CLAUDE_PLUGIN_ROOT}/scripts에 산다.
+# 후자를 우선 존중해 smoke가 두 환경 모두에서 동작(worker 지적 반영).
+_PLUG = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+HOOKS_DIR = (os.path.join(_PLUG, "scripts") if _PLUG and os.path.isdir(os.path.join(_PLUG, "scripts"))
+             else os.path.join(HOME, ".claude", "hooks"))
 
 # $-가중 단가는 memory harness-design-principles의 📌 SSOT가 근거 — 여기 값은 롤업 편의용 표기이고
-# 세대교체 시 그 SSOT를 먼저 고친다(cache_read=0.1x·cache_write=1.25x는 prompt-caching 문서).
+# 세대교체 시 그 SSOT를 먼저 고친다(2026-07 기준, cache_read=0.1x·cache_write=1.25x는 prompt-caching 문서).
 PRICE = {  # (input_per_mtok, output_per_mtok)
     "opus": (5.0, 25.0),
-    "sonnet": (3.0, 15.0),   # 인트로 프로모션 단가는 만료 예정 — sticker(정가)로 계산(보수적)
+    "sonnet": (3.0, 15.0),   # intro $2/$10은 2026-08-31 만료 — sticker로 계산(보수적)
     "fable": (10.0, 50.0),
     "haiku": (1.0, 5.0),
 }
@@ -165,7 +169,7 @@ def cmd_report(args):
     for k, n in denials.most_common():
         print(f"  {k}: {n}")
 
-    # reviewer calibration 수동신호: workflow journal의 verdict mix.
+    # reviewer calibration 수동신호(2026-07-16): workflow journal의 verdict mix.
     # 러버스탬프 퇴화 탐지 — 건강한 reviewer는 confirmed만이 아니라 adjust/refuted를 섞어낸다.
     # 회의율(=(adjust+refuted)/total)이 붕괴하면 verify가 형해화 신호(단 clean 배치는 원래 confirmed 우세라 강신호는 아님 — 능동 probe=reviewer-calibration.js가 정밀).
     vk = Counter()

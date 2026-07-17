@@ -35,12 +35,12 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 - **운영조건/fault-injection** *(맥락추론 — `model:'opus'` 라우팅)* — 정적 코드가 아니라 런타임 실패 모드: 외부의존(거래소·결제·소켓·큐)·상태기계면 타임아웃·부분체결·에러코드·rate-limit·재연결·동시성에서 어떻게 깨지나. **스테이징/testnet이 구조적으로 못 보는 환경분기가 있으면 'done'이 아니라 '실환경 카나리 전 unknown'으로 표기.**
 - workflow: `agent(prompt, {model: 'sonnet', schema})`
 - 인터랙티브: Task로 `subagent_type: worker` spawn (worker.md가 Sonnet+effort 고정)
-- 어려운 추론이 필요한 단위만 `'opus'`로. **(Sonnet 5세대 기준)** ultracode에선 inline sonnet analyze도 이제 실제 xhigh를 상속 → analyze 기본 능력↑라 opus로 보낼 단위가 준다. 단 어뷰징·무결성/운영조건·fault-injection 렌즈의 opus 라우팅은 **유지 확정** — **paired-run 실측(결제/권한 도메인 프로젝트): 경제무결성 슬라이스 material_gap**(sonnet-xhigh가 real high '환불 전면 불능'을 완전 누락, opus 환각 0건). 권한/역할 슬라이스는 minor_gap(top finding shared)이라 sonnet 근접이나 같은 렌즈에 묶여 분리 downgrade는 비효율. (n=2 스팟체크 — 방향은 '경제무결성=opus·순수역할=sonnet 근접', 추가 실측 시 재고 여지. 재검토 TTL: 분기 1회 paired-run 재실측.)
+- 어려운 추론이 필요한 단위만 `'opus'`로. **(2026-07-01 Sonnet 5)** ultracode에선 inline sonnet analyze도 이제 실제 xhigh를 상속 → analyze 기본 능력↑라 opus로 보낼 단위가 준다. 단 어뷰징·무결성/운영조건·fault-injection 렌즈의 opus 라우팅은 **유지 확정** — **paired-run 실측(2026-07-01, Pro-Bid 자금경로+권한): 경제무결성 슬라이스 material_gap**(sonnet-xhigh가 real high '환불 전면 불능'을 완전 누락, opus 환각 0건). 권한/역할 슬라이스는 minor_gap(top finding shared)이라 sonnet 근접이나 같은 렌즈에 묶여 분리 downgrade는 비효율. (n=2 스팟체크 — 방향은 '경제무결성=opus·순수역할=sonnet 근접', 추가 실측 시 재고 여지. 재검토 TTL: 분기 1회 paired-run 재실측.)
 
 ## 4. adversarial 검증 — opus tier (생략 금지)
 각 critical/high finding(기본 — dial로 medium 이하 확장)을 **다른 에이전트가 반증 시도** — 실제 파일/근거를 다시 열어 거짓양성·과장·지어낸 명령/경로를 거른다. 살아남은 것만 채택. 확실치 않으면 보수적으로 의심. (§0.5 verify 트리거와 동일 기준 — 절마다 다르게 읽히면 안 된다.)
-- 검증 tier = **`reviewer`**(Opus xhigh, **구조적 read-only** — Bash 포함 write 계열 전부 tool 목록에서 제거, 상세는 reviewer.md frontmatter가 SSOT. 트레이드오프: 테스트 실행 같은 동적 검증은 reviewer가 못 하므로 메인에 위임). workflow: `agent(\`반증하라: ${finding}\`, {agentType: 'reviewer', schema: VERDICT})` (`{model:'opus'}`도 동작하나 reviewer면 effort·read-only가 frontmatter로 고정). 인터랙티브: Task로 `subagent_type: reviewer` spawn.
-- **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·자금 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐(audit-loop.js 내부 동작이 아니라 결과 수신 후 오케스트레이터가 수행). **Sonnet 5가 싸고 near-Opus라도 verify tier는 sonnet으로 안 내린다** — producer(worker=sonnet)와 같은 weight면 blind spot이 correlated라 반증이 죽는다(cross-model opus skeptic이 핵심). 비용은 하네스상 downgrade 기준이 아님.
+- 검증 tier = **`reviewer`**(Opus xhigh, **구조적 read-only** — 2026-07-16부터 Bash 포함 write 계열 전부 tool 목록에서 제거, 상세는 reviewer.md frontmatter가 SSOT. 트레이드오프: 테스트 실행 같은 동적 검증은 reviewer가 못 하므로 메인에 위임). workflow: `agent(\`반증하라: ${finding}\`, {agentType: 'reviewer', schema: VERDICT})` (`{model:'opus'}`도 동작하나 reviewer면 effort·read-only가 frontmatter로 고정). 인터랙티브: Task로 `subagent_type: reviewer` spawn.
+- **verify끼리 모순이거나 고위험 변경(마이그레이션·배포·자금 경로)의 최종 판정이면 메인급 tiebreak 1회** — model 미지정 agent()(=메인 inherit)로. 메인급 fan-out은 이 경우뿐(audit-loop.js 내부 동작이 아니라 결과 수신 후 오케스트레이터가 수행). **(2026-07-01) Sonnet 5가 싸고 near-Opus라도 verify tier는 sonnet으로 안 내린다** — producer(worker=sonnet)와 같은 weight면 blind spot이 correlated라 반증이 죽는다(cross-model opus skeptic이 핵심). 비용은 하네스상 downgrade 기준이 아님.
 
 ## 5. 완성도 critic → verify 재투입 (수렴 루프, opus tier)
 별도 렌즈로 "빠진 게 뭔가 — 안 본 모듈·미검증 주장·미확인 가정·안 돌린 렌즈"를 재점검. critic·verify 모두 **`reviewer` tier**(§4) — 둘은 같은 opus read-only 검증 에이전트의 두 모드(반증 vs 완성도)일 뿐 별도 에이전트가 아니다.
@@ -50,13 +50,14 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 ## 6. 종합 (무손실)
 severity로 정렬한 findings + 구체 권고. 반복 결함은 단위별 땜질이 아니라 **구조적 처방**(공유 모듈/규칙/SSOT). **무손실 규칙: critical/high·자금경로·보안 raw finding은 종합 압축이 절대 묻지 못한다** — '대체로 production-grade' 같은 top-line이 그 아래 critical을 가리면 안 된다. 위임자(메인)는 종합 *요약문*이 아니라 **raw 차원별 리스트를 직접 읽고 보고**한다. verify/critic이 rate-limit·세션한도로 부분 실패하면 그 결과를 **DEGRADED(미검증)**로 표기하고 낙관 top-line을 보류한다(잘린 draft를 '완료'로 relay 금지).
 
-## 6.5 산출물 durable화 (읽고 버리지 않기 — dated md 생성 금지)
+## 6.5 산출물 durable화 (읽고 버리지 않기 — 2026-07-16, dated md 생성 금지)
 감사 결과를 세션과 함께 휘발시키지 마라(자가감사 실측: '전체 분석해줘'를 프로젝트마다 반복하는 마찰의 근본원인이 산출물 비내구성 — AUDIT_<date>.md 난립이 그 증상). substantive 감사 종점은 **dated 스냅샷 md가 아니라 원장/두뇌 upsert**다(`.ksi/`가 있을 때). 두 write-path 모두 `python3 ~/.claude/scripts/ksi-goals.py --dir <proj>`:
 - **findings → 원장(할 일):** survivor finding(verify 통과)을 `register --id <G###> --title <finding> --criteria <완료기준>`으로 proposed goal 적재(중복은 id로). '완료'는 자기신고가 아니라 reviewer 증거 게이트로만.
 - **모듈 현황 → 두뇌(무엇이 있나):** 감사한 각 모듈을 `state-set --module <경로> --status green|risk|unknown --note "<한줄>" --audit-ref <goal id 또는 근거>`로 upsert. state는 git HEAD로 freshness 스탬프돼, 다음 SessionStart에 goal-status.sh가 '현황+stale(코드 변경 후 미재감사)'을 복원 → **다음 세션이 재분석 대신 '두뇌 읽고 이어가기'**가 된다. reviewer-confirmed만 등록(원장/두뇌 노이즈 방지).
 - `.ksi/`가 없으면 → `/goals init` 후 위 두 upsert를 1줄 제안(goal-status.sh path B 넛지와 정렬). 자금경로·상태전이·멀티세션 프로젝트는 원장화가 기본값.
 - **AUDIT_<date>.md 신규 파일은 만들지 마라** — 그게 휘발·재분석의 근원. 굳이 prose 요약이 필요하면 기존 파일 갱신(신규 dated 파일 금지).
 - **fleet 전파(어뷰징 finding 한정):** '어뷰징·무결성' 렌즈가 confirmed 어뷰징 finding을 내면, 같은 클래스를 공유하는 형제 프로젝트에도 거의 항상 존재한다 — 그 음성 케이스를 형제의 `.ksi` 원장에 proposed goal로 register한다(전파 대상 맵·규율 SSOT = `~/.claude/templates/domain-invariants.example.md`의 'Fleet 전파' 절). verify 통과분만 전파(환각 확산 금지).
+- **제품 리스크 기록(fix 안 할 것·수용할 것):** 지금 고칠 게 아니라 **추적·수용** 대상인 보안/DB/어뷰징 finding은 goal이 아니라 risk로 — `ksi-goals.py --dir <proj> risk-add --id <R##> --title <finding> --lens <role/economic/gaming/time-axis/db/secret> --severity <..>`. 나중에 고치면 그 finding을 goal로 register(→goals-run 자율소진), 지금 안 고치기로 하면 `risk-accept --reason <근거>`(baseline — 근거 필수). goal의 completion 술어를 오염시키지 않게 risk는 분리 lifecycle(open→accepted/resolved→regressed). goal-status가 SessionStart에 미해소 risk를 복원.
 
 ## 원칙
 - **티어링(3-tier 워커 + 메인급):** 탐색=Explore/scout(`'haiku'`) · 분석·구현=worker(`'sonnet'`) · verify·완성도 critic=**reviewer**(`'opus'`·xhigh·read-only) · 모순 tiebreak/고위험 최종=메인급(미지정 inherit, 의도적으로만) · 판정·종합=메인(Fable이든 Opus든 무관). 모델은 alias로 지정 — 풀 ID 하드코딩 금지.

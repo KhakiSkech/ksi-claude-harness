@@ -4,10 +4,12 @@
 # 이쪽은 outbound 실행 직전이 아니라 inbound 콘텐츠 유입 직후 개입 지점).
 # 비차단 — additionalContext 1줄만 주입, 판단은 여전히 모델·사용자 몫(gate-nudge.sh와 동형).
 set -uo pipefail
+. "$(dirname "$0")/ksi-mode.sh" 2>/dev/null || KSI_MODE=strict
+[ "${KSI_MODE:-strict}" = off ] && exit 0   # escape: off면 넛지 침묵(0.8.3)
 
 input="$(cat)"
 out="$(TB_INPUT="$input" python3 - <<'PY' 2>/dev/null
-import json, os, sys
+import json, os, sys, tempfile
 
 try:
     d = json.loads(os.environ.get("TB_INPUT", "") or "{}")
@@ -21,7 +23,8 @@ if tool not in ("WebFetch", "WebSearch"):
 sid = d.get("session_id", "") or "nosession"
 
 # 세션당 1회 dedup (sentinel) — gate-nudge.sh 패턴 재사용.
-sent = f"/tmp/claude-{os.getuid()}/trustboundary-{sid}"
+# Windows 이식성(2026-07-18): os.getuid() POSIX 전용·/tmp→C:\tmp 오해석 → gettempdir()+getuid 폴백(POSIX 불변).
+sent = os.path.join(tempfile.gettempdir(), f"claude-{getattr(os, 'getuid', lambda: 0)()}", f"trustboundary-{sid}")
 try:
     os.makedirs(os.path.dirname(sent), exist_ok=True)
     if os.path.exists(sent):

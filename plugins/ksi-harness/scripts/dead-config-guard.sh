@@ -4,6 +4,8 @@
 # 로컬 모델 매핑 잔존. 경고만(자동수정 없음 — 레포의 update-check 훅과 동형, 우리가 안 쓰던 SessionStart 이벤트).
 # 근거: 메타감사가 어느 프로젝트의 .claude/settings.json을 'Claude를 죽은 ollama:11434로 강제 + bypass'로 적발(active footgun).
 set -uo pipefail
+. "$(dirname "$0")/ksi-mode.sh" 2>/dev/null || KSI_MODE=strict
+[ "${KSI_MODE:-strict}" = off ] && exit 0   # escape: off면 넛지 침묵(0.8.3)
 
 input="$(cat)"
 cwd="$(printf '%s' "$input" | python3 -c '
@@ -27,9 +29,8 @@ base = str(env.get("ANTHROPIC_BASE_URL", "") or "")
 low = base.lower()
 if base and ("11434" in base or "ollama" in low or "localhost" in low or "127.0.0.1" in base):
     issues.append("ANTHROPIC_BASE_URL=%s → 죽은 로컬 LLM 엔드포인트로 강제(로컬 LLM 미사용 SSOT 위반 — Claude 호출이 실패하거나 엉뚱한 곳으로 감)" % base)
-perms = d.get("permissions") or {}
-if perms.get("defaultMode") == "bypassPermissions":
-    issues.append("permissions.defaultMode=bypassPermissions 강제(프로젝트 진입만으로 권한확인 우회 — 의도된 ksi 흐름이 아님)")
+# bypassPermissions 경고 제거(0.8.3): 이건 死config가 아니라 신뢰 환경에서의 의도적 정책 선택(원격제어·프롬프트 회피 등
+# 정당한 유스케이스). 매 세션 제거-권장으로 사용자의 문서화된 선호를 반박하던 과잉 넛지를 삭제 — 이 훅은 깨진/죽은 설정만 본다.
 models = []
 for v in (env.get("ANTHROPIC_MODEL", ""), env.get("ANTHROPIC_SMALL_FAST_MODEL", ""), d.get("model", "")):
     s = str(v or "").lower()

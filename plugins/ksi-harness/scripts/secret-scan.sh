@@ -6,10 +6,12 @@
 # - 입력(JSON)은 stdin으로 받는다 — Write는 파일 내용 전체가 입력에 실려 argv(MAX_ARG_STRLEN 128KB)를 넘길 수 있다.
 # - 1h dedup: 같은 (파일+발견) 경고를 반복 주입하지 않는다(ruff 훅 sentinel 패턴 재사용).
 set -uo pipefail
+. "$(dirname "$0")/ksi-mode.sh" 2>/dev/null || KSI_MODE=strict
+[ "${KSI_MODE:-strict}" = off ] && exit 0   # escape: off면 민감쓰기 넛지 침묵(0.8.3 · push 시크릿 유출 하드가드는 exfil-guard가 모드 무관 유지)
 
 # 프로그램은 -c 인자(약 4KB, 한도 내), 큰 입력은 stdin으로 흘려보낸다. 프로그램 내부에 작은따옴표(')를 쓰지 않는다(\x27로 대체).
 python3 -c '
-import sys, json, os, re, hashlib, time
+import sys, json, os, re, hashlib, time, tempfile
 
 try:
     d = json.load(sys.stdin)
@@ -20,6 +22,10 @@ ti = d.get("tool_input", {}) or {}
 fp = ti.get("file_path") or ti.get("path") or ti.get("notebook_path") or ""
 if not fp or not os.path.isfile(fp):
     sys.exit(0)
+
+tool = d.get("tool_name", "") or ""
+old_s = ti.get("old_string") or ""
+new_s = ti.get("new_string") or ""
 
 home = os.path.expanduser("~")
 npath = os.path.normpath(fp)
@@ -42,20 +48,30 @@ if npath == os.path.normpath(os.path.join(home, ".claude", "settings.json")):
     except Exception:
         pass
 
-# ---------- 시크릿·마이그레이션: 예시/락/노드모듈/훅자신 제외 ----------
+# ---------- 시크릿·마이그레이션: 예시/락/노드모듈/훅자신/데이터·바이너리 제외 ----------
+# 효율(0.8.3): 데이터/바이너리 확장자는 시크릿 정규식이 의미 없고 대용량이라 스캔 낭비 — 제외.
+DATA_EXTS = (".csv", ".tsv", ".parquet", ".png", ".jpg", ".jpeg", ".gif", ".webp",
+             ".pdf", ".zip", ".gz", ".tar", ".woff", ".woff2", ".ttf", ".ico", ".mp4",
+             ".map", ".min.js", ".min.css")
 is_excluded = (
     low.endswith((".example", ".sample", ".lock"))
+    or low.endswith(DATA_EXTS)
     or low in ("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock")
     or "/node_modules/" in norm
     or npath.startswith(os.path.normpath(os.path.join(home, ".claude", "hooks")))
 )
 
 if not is_excluded:
-    try:
-        with open(fp, encoding="utf-8", errors="replace") as f:
-            text = f.read(1000000)
-    except Exception:
-        text = ""
+    # 효율(0.8.3): Edit/MultiEdit는 새로 추가된 텍스트(new_string)만 스캔 — 매 편집 전체(≤1MB) 재읽기 낭비 제거.
+    # 신규 유입 시크릿/파괴적 DDL을 잡는 목적엔 added text로 충분. Write(전체 파일)만 파일을 읽는다.
+    if tool in ("Edit", "MultiEdit") and (new_s or old_s):
+        text = new_s
+    else:
+        try:
+            with open(fp, encoding="utf-8", errors="replace") as f:
+                text = f.read(1000000)
+        except Exception:
+            text = ""
 
     if text:
         # (1) 하드코딩 시크릿 — 고신뢰 패턴
@@ -93,7 +109,12 @@ if not is_excluded:
                 ddl.append("ALTER...DROP")
             if re.search(r"(?i)\bRENAME\s+(TO|COLUMN|TABLE)\b", text):
                 ddl.append("RENAME")
-            if re.search(r"(?i)\bSET\s+NOT\s+NULL\b", text) or (re.search(r"(?i)\bNOT\s+NULL\b", text) and not re.search(r"(?i)\bDEFAULT\b", text)):
+            # NOT NULL(DEFAULT 없음)은 기존 테이블 변경(ALTER)일 때만 위험 — 신규 CREATE TABLE의 NOT NULL은 정상.
+            # 예전엔 CREATE TABLE ... NOT NULL도 파괴적으로 오표기(0.8.3 교정): SET NOT NULL 또는 ALTER TABLE 문맥에서만 발화.
+            if re.search(r"(?i)\bSET\s+NOT\s+NULL\b", text) or (
+                re.search(r"(?i)\bALTER\s+TABLE\b[\s\S]{0,200}\bNOT\s+NULL\b", text)
+                and not re.search(r"(?i)\bDEFAULT\b", text)
+            ):
                 ddl.append("NOT NULL(DEFAULT 없음)")
             if ddl:
                 msg = "파괴적 마이그레이션 DDL: " + ", ".join(ddl) + "."
@@ -107,7 +128,7 @@ if not findings:
 
 # 1h dedup (file+findings 해시) — 같은 경고 반복 주입 방지
 key = hashlib.sha1((npath + "|" + "||".join(findings)).encode("utf-8", "replace")).hexdigest()
-sentinel = os.path.join(os.environ.get("TMPDIR", "/tmp"), "claude-secret-scan.last")
+sentinel = os.path.join(tempfile.gettempdir(), "claude-secret-scan.last")  # Windows에서 /tmp→C:\tmp 오배치 방지(gettempdir=%TEMP%)
 now = int(time.time())
 seen = {}
 try:

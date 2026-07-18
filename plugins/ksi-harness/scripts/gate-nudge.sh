@@ -11,15 +11,22 @@
 #   패턴과 정렬). (d) 안전한 어휘만 확장(scaffold, 새/신규+시스템·플로우·플랫폼·모듈) — "명사+추가/넣/붙이
 #   인접" 등 넓은 확장은 소작업(예: "API에 파라미터 추가해줘")에서 높은 FP로 실측 기각.
 set -uo pipefail
+. "$(dirname "$0")/ksi-mode.sh" 2>/dev/null || KSI_MODE=strict
+[ "${KSI_MODE:-strict}" = off ] && exit 0   # escape: off면 넛지 침묵(0.8.3)
 
 input="$(cat)"
 out="$(GATE_INPUT="$input" python3 - <<'PY' 2>/dev/null
-import json, os, re, sys, time
+import json, os, re, sys, time, tempfile
 
 try:
     d = json.loads(os.environ.get("GATE_INPUT", "") or "{}")
 except Exception:
     sys.exit(0)
+
+# Windows 이식성(2026-07-18): os.getuid()는 POSIX 전용 — Windows Python에선 AttributeError로 훅이 죽어(넛지 무발화)
+# /tmp도 C:\tmp로 오해석. gettempdir()+getuid 폴백으로 통일(POSIX 동작 불변).
+def _tmpbase():
+    return os.path.join(tempfile.gettempdir(), f"claude-{getattr(os, 'getuid', lambda: 0)()}")
 prompt = d.get("prompt", "") or ""
 sid = d.get("session_id", "") or "nosession"
 # 슬래시 커맨드·짧은 프롬프트·이미 게이트를 언급한 프롬프트엔 침묵
@@ -43,9 +50,9 @@ PAT = re.compile(
 # 담아 민감정보 위험) — 매칭된 것만, 세션당 1회 dedup 이전 시점에 남겨 "발화 시도" 자체를 durable하게 센다.
 if PAT.search(prompt):
     try:
-        logdir = f"/tmp/claude-{os.getuid()}"
+        logdir = _tmpbase()
         os.makedirs(logdir, exist_ok=True)
-        with open(f"{logdir}/gate-nudge-fires.log", "a") as lf:
+        with open(os.path.join(logdir, "gate-nudge-fires.log"), "a") as lf:
             lf.write(f"{int(time.time())}\t{sid}\n")
     except Exception:
         pass
@@ -53,7 +60,7 @@ if not PAT.search(prompt):
     sys.exit(0)
 # 세션당 1회 dedup (sentinel) — 넛지 자체(사용자에게 보이는 신호)는 여전히 세션 1회로 제한(피로 방지).
 # 위 로그는 이 dedup 이전에 이미 기록되므로 "실제 매칭 횟수"와 "발화 횟수"를 분리해서 잴 수 있다.
-sent = f"/tmp/claude-{os.getuid()}/gate-nudge-{sid}"
+sent = os.path.join(_tmpbase(), f"gate-nudge-{sid}")
 try:
     os.makedirs(os.path.dirname(sent), exist_ok=True)
     if os.path.exists(sent):

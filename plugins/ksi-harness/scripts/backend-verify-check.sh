@@ -12,10 +12,12 @@
 #      순수 util·스키마·설정만 고친 세션엔 침묵(과발화 방지 — .py는 .tsx보다 변경 빈도가 훨씬 높다).
 # - 루프 방지: stop_hook_active면 통과. transcript 없음/파싱 오류/비-git면 graceful 통과(세션 안 깸).
 set -uo pipefail
+. "$(dirname "$0")/ksi-mode.sh" 2>/dev/null || KSI_MODE=strict
+[ "${KSI_MODE:-strict}" = off ] && exit 0   # escape: off면 이 완료 게이트 침묵(0.8.3)
 
 input="$(cat)"
 
-python3 - "$input" <<'PY' 2>/dev/null || exit 0
+KSI_MODE="${KSI_MODE:-strict}" python3 - "$input" <<'PY' 2>/dev/null || exit 0
 import sys, json, os
 
 try:
@@ -34,6 +36,37 @@ if not tp or not os.path.exists(tp):
 EXTS = (".py",)
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit"}
 changed = set()
+mode = os.environ.get("KSI_MODE", "strict")
+
+# 효율(0.8.3): 값싼 git 게이트를 비싼 transcript/사이드카 파싱보다 먼저 — 미커밋 .py가 하나도 없으면
+# transcript 전체 파싱을 통째로 건너뛴다(관련 미커밋 0인 흔한 Stop에서 O(transcript) 비용 제거). git 불가면 종전대로 진행(graceful).
+import subprocess
+
+cwd = d.get("cwd") or os.getcwd()
+
+
+def _git(args):
+    try:
+        r = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=5)
+        return r.stdout.splitlines() if r.returncode == 0 else None
+    except Exception:
+        return None
+
+
+_diff = _git(["diff", "--name-only", "HEAD"])
+_untracked = _git(["ls-files", "--others", "--exclude-standard"])
+_root = _git(["rev-parse", "--show-toplevel"])
+git_ok = _diff is not None and _untracked is not None and bool(_root)
+uncommitted = None
+if git_ok:
+    _exts_rels = [r for r in (*_diff, *_untracked) if r.strip() and r.endswith(EXTS)]
+    if not _exts_rels:
+        sys.exit(0)  # 미커밋 .py 없음 → 파싱 불필요, 조기 종료(git-first)
+    base = _root[0]
+    uncommitted = {
+        os.path.normcase(os.path.normpath(os.path.join(base, rel)))
+        for rel in _exts_rels
+    }
 
 # 1) 전체 레코드를 먼저 읽는다(compaction 경계를 알아야 그 이후만 보기 때문).
 try:
@@ -119,35 +152,10 @@ except Exception:
 if not changed:
     sys.exit(0)
 
-# 4) git 미커밋 .py 변경과 교차 — 이미 커밋된 편집은 제외.
-import subprocess
-
-cwd = d.get("cwd") or os.getcwd()
-
-
-def _git(args):
-    try:
-        r = subprocess.run(
-            ["git", "-C", cwd, *args], capture_output=True, text=True, timeout=5
-        )
-        return r.stdout.splitlines() if r.returncode == 0 else None
-    except Exception:
-        return None
-
-
-diff = _git(["diff", "--name-only", "HEAD"])
-untracked = _git(["ls-files", "--others", "--exclude-standard"])
-root = _git(["rev-parse", "--show-toplevel"])
-if diff is None or untracked is None or not root:
+# 4) git 미커밋 .py 변경과 교차 — uncommitted는 위(git-first)에서 이미 계산. git 불가면 graceful 통과.
+#    normcase: Windows NTFS는 대소문자 무시라 케이스가 갈리면 교차가 공집합이 되는 거짓음성 — normcase로 케이스폴드(POSIX no-op).
+if not git_ok or uncommitted is None:
     sys.exit(0)
-base = root[0]
-# normcase: Windows NTFS는 대소문자 무시라 git toplevel과 tool_use 경로의 케이스가 갈리면
-# 교차가 공집합이 되는 거짓음성 발생 — normcase로 케이스폴드(POSIX에선 no-op).
-uncommitted = {
-    os.path.normcase(os.path.normpath(os.path.join(base, rel)))
-    for rel in (*diff, *untracked)
-    if rel.strip()
-}
 changed = {os.path.normcase(os.path.normpath(p)) for p in changed} & uncommitted
 
 if not changed:
@@ -172,13 +180,20 @@ n = len(interesting)
 if n == 0:
     sys.exit(0)
 
+# escape(0.8.3): warn/off는 완료를 차단하지 않는다(off는 bash에서 이미 종료 · warn은 여기서 non-block allow).
+if mode != "strict":
+    sys.exit(0)
+
 # dedup (하네스 자가감사, CONFIRMED high): 동일 파일셋 반복 재넛지 차단 — ui-render-check와 동형.
 # 키=정렬 fileset 해시(셋 변경 시 재넛지) + 세션당 하드캡 3회. 상세 근거는 ui-render-check.sh 주석 참조.
-import hashlib, glob as _glob
+import hashlib, glob as _glob, tempfile
 sid = d.get("session_id", "") or "nosession"
 fs_hash = hashlib.sha1("\n".join(sorted(interesting)).encode()).hexdigest()[:8]
-sent_dir = f"/tmp/claude-{os.getuid()}"
-sent = f"{sent_dir}/backendverify-nudge-{sid}-{fs_hash}"
+# Windows 이식성(2026-07-18): os.getuid()는 POSIX 전용이라 Windows Python이면 AttributeError로 훅이 발화 직전
+# 죽어 영영 침묵했다(stderr는 2>/dev/null에 은폐). /tmp도 Windows Python에선 C:\tmp로 오해석 →
+# gettempdir()(POSIX=TMPDIR//tmp·Win=%TEMP%) + getuid 폴백으로 교체(POSIX 동작 불변).
+sent_dir = os.path.join(tempfile.gettempdir(), f"claude-{getattr(os, 'getuid', lambda: 0)()}")
+sent = os.path.join(sent_dir, f"backendverify-nudge-{sid}-{fs_hash}")
 try:
     os.makedirs(sent_dir, exist_ok=True)
     if os.path.exists(sent):

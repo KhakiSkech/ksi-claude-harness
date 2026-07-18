@@ -14,6 +14,12 @@ failt() { echo "FAIL  $1"; fail=1; }
 
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
+# Windows 이식성(2026-07-18): 훅의 python은 native Windows 인터프리터라 JSON stdin으로 넘어온 MSYS 경로
+# (/tmp/tmp.XXX)를 os.path로 해석 못 해 파일을 못 찾고 조용히 통과했다(테스트만의 거짓실패 — 실훅은 native 경로를 받음).
+# JSON에 박는 경로만 native(cygpath -m = forward-slash, JSON 이스케이프 불필요 + Windows python 해석 가능)로 변환하고,
+# bash 파일 조작은 계속 $T(MSYS)를 쓴다. POSIX(cygpath 부재)에선 TW=T로 무변화.
+if command -v cygpath >/dev/null 2>&1; then TW="$(cygpath -m "$T")"; else TW="$T"; fi
+SID="test-$$"   # 세션 sentinel 누적으로 인한 하드캡 flakiness 방지(고유 세션키 → 매 실행 격리)
 (
   cd "$T" && git init -q . && git config user.email t@t && git config user.name t &&
   echo base > base.txt && git add . && git commit -qm base
@@ -23,9 +29,10 @@ printf 'export default function D(){return null}\n' > "$T/components/D.tsx"
 printf 'def test_x():\n    assert True\n' > "$T/tests/test_x.py"
 printf 'def helper():\n    pass\n' > "$T/util.py"
 
-TP="$T/transcript.jsonl"
+TP="$T/transcript.jsonl"     # bash 쓰기 대상(MSYS)
+TPW="$TW/transcript.jsonl"   # JSON 임베드용(native)
 rec() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"%s"}}]}}\n' "$1"; }
-pay() { printf '{"transcript_path":"%s","cwd":"%s"}' "$TP" "$T"; }
+pay() { printf '{"transcript_path":"%s","cwd":"%s","session_id":"%s"}' "$TPW" "$TW" "$SID"; }
 
 run_hook() { pay | bash "$HOOKS/$1"; }
 expect_block() {
@@ -38,19 +45,22 @@ expect_silent() {
 }
 
 echo "== Stop 훅: 발화 케이스 (미커밋 변경) =="
-rec "$T/components/D.tsx" > "$TP";  expect_block  ui-render-check.sh      "미커밋 .tsx → block"
-rec "$T/tests/test_x.py" > "$TP";   expect_block  backend-verify-check.sh "미커밋 tests/*.py → block"
+rec "$TW/components/D.tsx" > "$TP";  expect_block  ui-render-check.sh      "미커밋 .tsx → block"
+rec "$TW/tests/test_x.py" > "$TP";   expect_block  backend-verify-check.sh "미커밋 tests/*.py → block"
 
 echo "== Stop 훅: 침묵 케이스 =="
-rec "$T/util.py" > "$TP";           expect_silent backend-verify-check.sh "순수 util.py → silent(경로 필터)"
-rec "$T/util.py" > "$TP";           expect_silent ui-render-check.sh      ".py는 프론트 훅 무관 → silent"
+rec "$TW/util.py" > "$TP";           expect_silent backend-verify-check.sh "순수 util.py → silent(경로 필터)"
+rec "$TW/util.py" > "$TP";           expect_silent ui-render-check.sh      ".py는 프론트 훅 무관 → silent"
 ( cd "$T" && git add -A && git commit -qm all )
-rec "$T/components/D.tsx" > "$TP";  expect_silent ui-render-check.sh      "커밋됨 → silent(git 교차)"
-rec "$T/tests/test_x.py" > "$TP";   expect_silent backend-verify-check.sh "커밋됨 → silent(git 교차)"
+# 커밋됨 케이스는 새 세션키로 격리 — 앞 block 케이스가 남긴 dedup sentinel이 동일 fileset이라
+# git-교차(커밋 제외) 회귀를 '침묵'으로 가려 false PASS 낼 수 있다(reviewer 지적). 새 SID면 침묵의 원인이 오직 git-교차.
+SID="$SID-committed"
+rec "$TW/components/D.tsx" > "$TP";  expect_silent ui-render-check.sh      "커밋됨 → silent(git 교차)"
+rec "$TW/tests/test_x.py" > "$TP";   expect_silent backend-verify-check.sh "커밋됨 → silent(git 교차)"
 
 echo "== Stop 훅: 루프 방지 + graceful =="
 for h in ui-render-check.sh backend-verify-check.sh; do
-  out="$(printf '{"stop_hook_active":true,"transcript_path":"%s","cwd":"%s"}' "$TP" "$T" | bash "$HOOKS/$h")"
+  out="$(printf '{"stop_hook_active":true,"transcript_path":"%s","cwd":"%s"}' "$TPW" "$TW" | bash "$HOOKS/$h")"
   [ -z "$out" ] && pass "$h — stop_hook_active 통과" || failt "$h — stop_hook_active에서 발화"
   out="$(printf '{}' | bash "$HOOKS/$h")"
   [ -z "$out" ] && pass "$h — 빈 입력 graceful" || failt "$h — 빈 입력에서 발화"
@@ -59,10 +69,10 @@ done
 echo "== PostToolUse 훅: ruff =="
 if command -v ruff >/dev/null 2>&1; then
   printf 'import os\n' > "$T/bad.py"   # F401 unused import
-  out="$(printf '{"tool_input":{"file_path":"%s"}}' "$T/bad.py" | bash "$HOOKS/ruff-check.sh")"
+  out="$(printf '{"tool_input":{"file_path":"%s"}}' "$TW/bad.py" | bash "$HOOKS/ruff-check.sh")"
   case "$out" in *additionalContext*) pass "ruff-check.sh — 위반 → 피드백 주입" ;; *) failt "ruff-check.sh — 위반인데 침묵" ;; esac
   printf 'x = 1\n' > "$T/good.py"
-  out="$(printf '{"tool_input":{"file_path":"%s"}}' "$T/good.py" | bash "$HOOKS/ruff-check.sh")"
+  out="$(printf '{"tool_input":{"file_path":"%s"}}' "$TW/good.py" | bash "$HOOKS/ruff-check.sh")"
   [ -z "$out" ] && pass "ruff-check.sh — 클린 → silent" || failt "ruff-check.sh — 클린인데 발화"
 else
   echo "SKIP  ruff 미설치 — ruff 케이스 건너뜀(훅 자체는 graceful skip이 정상 동작)"
@@ -74,13 +84,13 @@ rm -f "${TMPDIR:-/tmp}/claude-secret-scan.last"   # dedup sentinel 초기화(테
 AWSKEY="AKIA$(tr -dc 'A-Z0-9' </dev/urandom 2>/dev/null | head -c 16)"
 ss() { printf '{"tool_input":{"file_path":"%s"}}' "$1" | bash "$HOOKS/secret-scan.sh"; }
 printf 'KEY = "%s"\n' "$AWSKEY" > "$T/leak.py"
-case "$(ss "$T/leak.py")" in *additionalContext*) pass "secret-scan.sh — 하드코딩 키 → 경고" ;; *) failt "secret-scan.sh — 키인데 침묵" ;; esac
+case "$(ss "$TW/leak.py")" in *additionalContext*) pass "secret-scan.sh — 하드코딩 키 → 경고" ;; *) failt "secret-scan.sh — 키인데 침묵" ;; esac
 printf 'x = 1\n' > "$T/noleak.py"
-out="$(ss "$T/noleak.py")"; [ -z "$out" ] && pass "secret-scan.sh — 클린 → silent" || failt "secret-scan.sh — 클린인데 발화"
+out="$(ss "$TW/noleak.py")"; [ -z "$out" ] && pass "secret-scan.sh — 클린 → silent" || failt "secret-scan.sh — 클린인데 발화"
 printf 'AWS_KEY=%s\n' "$AWSKEY" > "$T/.env.example"
-out="$(ss "$T/.env.example")"; [ -z "$out" ] && pass "secret-scan.sh — .env.example 제외 → silent" || failt "secret-scan.sh — 예시인데 발화"
+out="$(ss "$TW/.env.example")"; [ -z "$out" ] && pass "secret-scan.sh — .env.example 제외 → silent" || failt "secret-scan.sh — 예시인데 발화"
 mkdir -p "$T/db/migrations"; printf 'DROP TABLE users;\n' > "$T/db/migrations/001.sql"
-case "$(ss "$T/db/migrations/001.sql")" in *additionalContext*) pass "secret-scan.sh — 파괴적 DDL → 경고" ;; *) failt "secret-scan.sh — DDL인데 침묵" ;; esac
+case "$(ss "$TW/db/migrations/001.sql")" in *additionalContext*) pass "secret-scan.sh — 파괴적 DDL → 경고" ;; *) failt "secret-scan.sh — DDL인데 침묵" ;; esac
 
 echo "== SessionStart 훅: update-check =="
 UCSENT="${TMPDIR:-/tmp}/claude-ksi-update-check.last"
@@ -107,36 +117,92 @@ echo "== PostToolUse 훅: sca-check =="
 scaclean() { rm -f "${TMPDIR:-/tmp}"/claude-sca-*.last; }   # 파일별 dedup sentinel 초기화
 sca() { printf '{"tool_input":{"file_path":"%s"}}' "$1" | bash "$HOOKS/sca-check.sh"; }
 scaclean; printf 'x = 1\n' > "$T/notdep.py"
-out="$(sca "$T/notdep.py")"; [ -z "$out" ] && pass "sca-check.sh — 비-의존성 파일 → silent" || failt "sca-check.sh — 비-의존성인데 발화"
+out="$(sca "$TW/notdep.py")"; [ -z "$out" ] && pass "sca-check.sh — 비-의존성 파일 → silent" || failt "sca-check.sh — 비-의존성인데 발화"
 scaclean; printf 'requests==2.0.0\n' > "$T/requirements.txt"
 if command -v pip-audit >/dev/null 2>&1; then
   echo "INFO  pip-audit 설치됨 — requirements 케이스는 취약점 DB 의존이라 발화/침묵 모두 정상(스킵)"
 else
-  case "$(sca "$T/requirements.txt")" in *additionalContext*) pass "sca-check.sh — pip-audit 미설치 → '미검증' 발화" ;; *) failt "sca-check.sh — 미설치인데 침묵(미검증 미표기)" ;; esac
+  case "$(sca "$TW/requirements.txt")" in *additionalContext*) pass "sca-check.sh — pip-audit 미설치 → '미검증' 발화" ;; *) failt "sca-check.sh — 미설치인데 침묵(미검증 미표기)" ;; esac
 fi
 scaclean
 
 echo "== SessionStart 훅: dead-config-guard =="
 dcg() { printf '{"cwd":"%s"}' "$1" | bash "$HOOKS/dead-config-guard.sh"; }
 mkdir -p "$T/dcg-clean"
-out="$(dcg "$T/dcg-clean")"; [ -z "$out" ] && pass "dead-config-guard.sh — settings 없음 → silent" || failt "dead-config-guard.sh — 설정없는데 발화"
+out="$(dcg "$TW/dcg-clean")"; [ -z "$out" ] && pass "dead-config-guard.sh — settings 없음 → silent" || failt "dead-config-guard.sh — 설정없는데 발화"
 mkdir -p "$T/dcg-bad/.claude"
 printf '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:11434"},"permissions":{"defaultMode":"bypassPermissions"}}' > "$T/dcg-bad/.claude/settings.json"
-case "$(dcg "$T/dcg-bad")" in *additionalContext*) pass "dead-config-guard.sh — footgun 설정 → 경고" ;; *) failt "dead-config-guard.sh — footgun인데 침묵" ;; esac
+case "$(dcg "$TW/dcg-bad")" in *additionalContext*) pass "dead-config-guard.sh — footgun 설정 → 경고" ;; *) failt "dead-config-guard.sh — footgun인데 침묵" ;; esac
 mkdir -p "$T/dcg-ok/.claude"
 printf '{"effortLevel":"high"}' > "$T/dcg-ok/.claude/settings.json"
-out="$(dcg "$T/dcg-ok")"; [ -z "$out" ] && pass "dead-config-guard.sh — 정상 설정 → silent" || failt "dead-config-guard.sh — 정상인데 발화"
+out="$(dcg "$TW/dcg-ok")"; [ -z "$out" ] && pass "dead-config-guard.sh — 정상 설정 → silent" || failt "dead-config-guard.sh — 정상인데 발화"
 
 echo "== SessionStart 훅: goal-status (goal-ledger 넛지) =="
 PR="$(dirname "$HOOKS")"   # plugin root → CLAUDE_PLUGIN_ROOT (scripts/ksi-goals.py 위치)
 gs() { printf '{"cwd":"%s"}' "$1" | CLAUDE_PLUGIN_ROOT="$PR" bash "$HOOKS/goal-status.sh"; }
 mkdir -p "$T/gs-none"
-out="$(gs "$T/gs-none")"; [ -z "$out" ] && pass "goal-status.sh — .ksi 없음 → silent" || failt "goal-status.sh — 원장없는데 발화"
+out="$(gs "$TW/gs-none")"; [ -z "$out" ] && pass "goal-status.sh — .ksi 없음 → silent" || failt "goal-status.sh — 원장없는데 발화"
 KG="$HOOKS/ksi-goals.py"
-python3 "$KG" --dir "$T/gs-ok" init --project demo >/dev/null 2>&1
-python3 "$KG" --dir "$T/gs-ok" register --id G1 --title work >/dev/null 2>&1
-python3 "$KG" --dir "$T/gs-ok" start --id G1 >/dev/null 2>&1
-case "$(gs "$T/gs-ok")" in *additionalContext*) pass "goal-status.sh — 미완 goal → 넛지" ;; *) failt "goal-status.sh — 미완 goal인데 침묵" ;; esac
+python3 "$KG" --dir "$TW/gs-ok" init --project demo >/dev/null 2>&1
+python3 "$KG" --dir "$TW/gs-ok" register --id G1 --title work >/dev/null 2>&1
+python3 "$KG" --dir "$TW/gs-ok" start --id G1 >/dev/null 2>&1
+case "$(gs "$TW/gs-ok")" in *additionalContext*) pass "goal-status.sh — 미완 goal → 넛지" ;; *) failt "goal-status.sh — 미완 goal인데 침묵" ;; esac
+
+echo "== escape(0.8.3): KSI_HOOKS 스위치 =="
+payid() { printf '{"transcript_path":"%s","cwd":"%s","session_id":"%s"}' "$TPW" "$TW" "$1"; }
+# 미커밋 화면 변경 하나 만들기(앞 섹션에서 전부 커밋됨) — 고유 세션키로 dedup 간섭 회피
+printf 'export default function D(){return <span className="c">changed</span>}\n' > "$T/components/D.tsx"
+rec "$TW/components/D.tsx" > "$TP"
+# 세션키에 $$ 포함 — sentinel이 실행 간 누적돼 dedup으로 거짓침묵(strict 미발화)나는 것 방지(hermetic).
+case "$(payid "es-strict-$$" | KSI_HOOKS=strict bash "$HOOKS/ui-render-check.sh")" in *'"block"'*) pass "escape ui-render — strict → block(대조)" ;; *) failt "escape ui-render — strict인데 미발화" ;; esac
+out="$(payid "es-off-$$" | KSI_HOOKS=off bash "$HOOKS/ui-render-check.sh")"; [ -z "$out" ] && pass "escape ui-render — off → silent" || failt "escape ui-render — off인데 발화"
+out="$(payid "es-warn-$$" | KSI_HOOKS=warn bash "$HOOKS/ui-render-check.sh")"; [ -z "$out" ] && pass "escape ui-render — warn → non-block" || failt "escape ui-render — warn인데 block"
+out="$(printf '{"prompt":"새 기능 만들어줘 대시보드 화면","session_id":"eg"}' | KSI_HOOKS=off bash "$HOOKS/gate-nudge.sh")"; [ -z "$out" ] && pass "escape gate-nudge — off → silent" || failt "escape gate-nudge — off인데 발화"
+
+echo "== escape(0.8.3): 안전벨트는 모드 무관 유지 =="
+pdg() { printf '{"tool_name":"Bash","tool_input":{"command":%s}}' "$(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$1")"; }
+pdg "rm -rf /" | KSI_HOOKS=off bash "$HOOKS/pre-destructive-guard.sh" >/dev/null 2>&1; [ $? -eq 2 ] && pass "pre-destructive — rm -rf / → off에서도 block(안전벨트)" || failt "rm -rf / off에서 통과(안전벨트 해제!)"
+pdg "git push --force origin main" | KSI_HOOKS=off bash "$HOOKS/pre-destructive-guard.sh" >/dev/null 2>&1; [ $? -eq 2 ] && pass "pre-destructive — push --force → off에서도 block" || failt "push --force off에서 통과"
+pdg "git push -fu origin feature" | KSI_HOOKS=off bash "$HOOKS/pre-destructive-guard.sh" >/dev/null 2>&1; [ $? -eq 2 ] && pass "pre-destructive — push -fu(스택 플래그) → block(자가감사 봉합)" || failt "push -fu 우회(안전벨트 구멍!)"
+pdg "git push -uf origin feature" | bash "$HOOKS/pre-destructive-guard.sh" >/dev/null 2>&1; [ $? -eq 2 ] && pass "pre-destructive — push -uf → block" || failt "push -uf 우회"
+pdg "git push --force-with-lease origin main" | bash "$HOOKS/pre-destructive-guard.sh" >/dev/null 2>&1; [ $? -eq 0 ] && pass "pre-destructive — push --force-with-lease 단독 → allow(안전 변형)" || failt "force-with-lease 오차단"
+pdg "git reset --hard" | KSI_HOOKS=strict bash "$HOOKS/pre-destructive-guard.sh" >/dev/null 2>&1; [ $? -eq 2 ] && pass "pre-destructive — reset --hard strict → block" || failt "reset --hard strict 미차단"
+pdg "git reset --hard" | KSI_HOOKS=warn bash "$HOOKS/pre-destructive-guard.sh" >/dev/null 2>&1; [ $? -eq 0 ] && pass "pre-destructive — reset --hard warn → allow(경고만)" || failt "reset --hard warn인데 차단"
+
+echo "== SCA diff-aware(0.8.3) =="
+scaclean; mkdir -p "$T/scad"; printf '[tool.ruff]\nline-length = 100\n' > "$T/scad/pyproject.toml"
+out="$(printf '{"tool_input":{"file_path":"%s","old_string":"line-length = 88","new_string":"line-length = 100"}}' "$TW/scad/pyproject.toml" | bash "$HOOKS/sca-check.sh" 2>&1)"
+[ -z "$out" ] && pass "sca — pyproject 비-의존성 편집(tool.ruff) → skip" || failt "sca — 비-의존성인데 실행: ${out:0:40}"
+# dep 신호 감지 로직을 직접 검증(네트워크 audit 없이 결정론적) — 특히 exact-pin false-negative 봉합(자가감사 confirmed)
+detect() { python3 -c '
+import sys, re
+DEP = re.compile(r"dependenc|==|>=|<=|~=|!=|\^[0-9]|~[0-9]|@\^?[0-9]|[0-9]+\.[0-9]", re.I)
+print("1" if DEP.search(sys.argv[1]) else "0")
+' "$1"; }
+[ "$(detect 'requests>=2.0')" = "1" ] && pass "sca dep-detect — operator dep 감지" || failt "sca — operator dep 미감지"
+[ "$(detect 'lodash 4.17.21')" = "1" ] && pass "sca dep-detect — exact npm pin(N.N.N) 감지(false-neg 봉합)" || failt "sca — exact npm pin 미감지(false-negative!)"
+[ "$(detect 'django = 4.2.0')" = "1" ] && pass "sca dep-detect — exact poetry pin 감지" || failt "sca — poetry exact 미감지(false-negative!)"
+[ "$(detect 'line-length = 100')" = "0" ] && pass "sca dep-detect — 정수 config(tool.ruff) → 여전히 skip" || failt "sca — 정수 config 오탐"
+[ "$(detect 'name = mypackage')" = "0" ] && pass "sca dep-detect — 비버전 편집 → skip" || failt "sca — 비버전 오탐"
+
+echo "== secret-scan CREATE TABLE NOT NULL 오표기 교정(0.8.3) =="
+rm -f "${TMPDIR:-/tmp}/claude-secret-scan.last" "$TEMP/claude-secret-scan.last" 2>/dev/null
+mkdir -p "$T/mig/migrations"
+printf 'CREATE TABLE users (id INT NOT NULL, name TEXT NOT NULL);\n' > "$T/mig/migrations/001c.sql"
+case "$(printf '{"tool_input":{"file_path":"%s"}}' "$TW/mig/migrations/001c.sql" | bash "$HOOKS/secret-scan.sh" 2>&1)" in
+  *"NOT NULL"*) failt "secret-scan — CREATE TABLE NOT NULL을 파괴적으로 오표기" ;;
+  *) pass "secret-scan — CREATE TABLE NOT NULL → 파괴적 미표기(교정)" ;;
+esac
+printf 'ALTER TABLE users ALTER COLUMN age SET NOT NULL;\n' > "$T/mig/migrations/002a.sql"
+case "$(printf '{"tool_input":{"file_path":"%s"}}' "$TW/mig/migrations/002a.sql" | bash "$HOOKS/secret-scan.sh" 2>&1)" in
+  *additionalContext*) pass "secret-scan — ALTER SET NOT NULL → 여전히 경고" ;;
+  *) failt "secret-scan — ALTER SET NOT NULL인데 미발화" ;;
+esac
+
+echo "== dead-config(0.8.3): bypassPermissions 단독은 더는 발화 안 함 =="
+mkdir -p "$T/dcg-bypass/.claude"
+printf '{"permissions":{"defaultMode":"bypassPermissions"}}' > "$T/dcg-bypass/.claude/settings.json"
+out="$(dcg "$TW/dcg-bypass")"; [ -z "$out" ] && pass "dead-config — bypassPermissions 단독 → silent(사용자 선호 존중)" || failt "dead-config — bypass 단독인데 발화"
 
 echo
 [ $fail -eq 0 ] && echo "✅ 전체 통과" || echo "❌ 실패 있음"

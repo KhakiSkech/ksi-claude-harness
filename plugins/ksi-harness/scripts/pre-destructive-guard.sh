@@ -13,10 +13,13 @@
 #   개행 분리가 이를 별도 세그먼트로 오차단할 수 있음(저빈도) — 오차단 의심되면 규칙을 좁혀라. $()·eval·
 #   base64 등으로 인코딩된 명령은 여전히 미탐지(heuristic 한계, 완전 파싱기가 아님).
 set -uo pipefail
+. "$(dirname "$0")/ksi-mode.sh" 2>/dev/null || KSI_MODE=strict
+# ⚠ 여기서 blanket off-exit 하지 않는다 — rm 루트/홈·push --force·DROP DB 하드가드는 모드 무관 항상 유지.
+# 모드는 python으로 넘겨 '되돌리기-가능(reset --hard/clean -f)'만 warn/off에서 경고로 낮춘다(0.8.3).
 
 input="$(cat)"
-GUARD_INPUT="$input" python3 - <<'PY'
-import json, os, re, shlex, sys
+GUARD_INPUT="$input" KSI_MODE="${KSI_MODE:-strict}" python3 - <<'PY'
+import json, os, posixpath, re, shlex, sys
 
 try:
     d = json.loads(os.environ.get("GUARD_INPUT", "") or "{}")
@@ -31,6 +34,18 @@ if not cmd:
 def block(reason):
     print(f"pre-destructive-guard 차단: {reason}", file=sys.stderr)
     sys.exit(2)
+
+
+MODE = os.environ.get("KSI_MODE", "strict")
+
+
+def soft_block(reason):
+    # 되돌리기-가능(로컬 미커밋/미추적 손실) 계열 — strict는 차단, warn/off는 경고만 하고 자율 실행 허용(escape, 0.8.3).
+    # rm 루트·push --force·DROP DB 같은 되돌리기-불가/외부영향은 이걸 쓰지 않고 항상 block().
+    if MODE == "strict":
+        block(reason)
+    print(f"pre-destructive-guard 경고(KSI_HOOKS={MODE}): {reason}", file=sys.stderr)
+    sys.exit(0)
 
 HOME = os.path.expanduser("~")
 SEG_SPLIT = re.compile(r"(?<!\\)(?:[;&|]+|[\r\n]+)")
@@ -113,8 +128,12 @@ def check_one(seg, depth):
                 exp = t2.replace("${HOME}", HOME).replace("$HOME", HOME)
                 if exp.startswith("~"):
                     exp = HOME + exp[1:]
-                norm = os.path.normpath(exp) if exp else exp
-                if norm == "/" or t2 in ("/*", "*", ".", "..") or norm.rstrip("/") == HOME:
+                # POSIX 셸 명령의 경로라 posixpath로 정규화 — os.path.normpath는 Windows에서 '/'를 '\'로 바꿔
+                # `norm == "/"`·`norm.count("/")` 검사가 전부 빗나가 `rm -rf /`가 통과하던 구멍(2026-07-18 자가감사 CONFIRMED).
+                norm = posixpath.normpath(exp) if exp else exp
+                # 루트: '/' 뿐 아니라 '//'·'///'(posixpath.normpath('//')=='//', POSIX 특례로 보존)도 전부 루트로 취급.
+                is_root = norm.startswith("/") and norm.strip("/") == ""
+                if is_root or t2 in ("/*", "*", ".", "..") or norm.rstrip("/") == HOME:
                     block(f"rm -r 복구불가급 대상: {t}")
                 if norm.startswith("/") and norm.count("/") == 1 and norm not in ("/tmp",):
                     block(f"rm -r 시스템 최상위 디렉토리: {t}")
@@ -125,19 +144,22 @@ def check_one(seg, depth):
     # --force-with-lease와 --force 병용 시 git은 --force가 이기므로 병용도 차단(단독 lease만 통과).
     if prog == "git" and "push" in args:
         pargs = args[args.index("push"):]
-        if any(a in ("--force", "-f") for a in pargs):
-            block("git push --force — --force-with-lease를 단독으로 쓰거나 사용자가 직접 실행(자율성 게이트 ①)")
+        # short-flag 스택(-fu·-uf·-fq 등)도 f 포함이면 force — git은 -fu를 -f -u로 파싱한다. exact 토큰 매칭만으론
+        # -fu가 새던 갭(2026-07-18 자가감사 confirmed) 봉합: rm/clean과 동일하게 단일-대시 플래그를 문자단위로 전개.
+        pshort = "".join(a.lstrip("-") for a in pargs if a.startswith("-") and not a.startswith("--"))
+        if ("f" in pshort) or any(a == "--force" for a in pargs):
+            block("git push --force(-f·-fu 등 f 포함) — --force-with-lease를 단독으로 쓰거나 사용자가 직접 실행(자율성 게이트 ①)")
 
     if prog == "git" and "reset" in args:
         rargs = args[args.index("reset"):]
         if "--hard" in rargs:
-            block("git reset --hard — 미커밋 변경 소실(자율성 게이트 ①, 필요 시 사용자가 직접)")
+            soft_block("git reset --hard — 미커밋 변경 소실(로컬·되돌리기 가능). strict면 차단, KSI_HOOKS=warn/off면 경고만")
 
     if prog == "git" and "clean" in args:
         cargs = args[args.index("clean"):]
         cshort = "".join(a.lstrip("-") for a in cargs if a.startswith("-") and not a.startswith("--"))
         if ("f" in cshort) or ("--force" in cargs):
-            block("git clean -f — 미추적 파일 소실(자율성 게이트 ①, 필요 시 사용자가 직접)")
+            soft_block("git clean -f — 미추적 파일 소실(로컬·되돌리기 가능). strict면 차단, KSI_HOOKS=warn/off면 경고만")
 
     if prog in ("psql", "mysql", "mariadb") or (prog == "supabase" and "db" in args):
         if re.search(r"(?i)\bdrop\s+(database|schema)\b", seg):

@@ -6,10 +6,12 @@
 #       넛지할 수 있는데 미배선이었음(audit-loop.js 같은 워크플로 경로는 verify가 이미 코드에 baked-in되지만,
 #       인터랙티브 Agent 스폰 경로는 넛지가 전무했다).
 set -uo pipefail
+. "$(dirname "$0")/ksi-mode.sh" 2>/dev/null || KSI_MODE=strict
+[ "${KSI_MODE:-strict}" = off ] && exit 0   # escape: off면 넛지 침묵(0.8.3)
 
 input="$(cat)"
 out="$(HOOK_INPUT="$input" python3 - <<'PY' 2>/dev/null
-import json, os, sys
+import json, os, sys, tempfile
 
 try:
     d = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
@@ -24,7 +26,8 @@ if agent_type != "worker":
 # 있었다 — worker fan-out 세션에서 worker가 끝날 때마다 같은 문단이 재주입됨. 넛지는 세션당 1회면 충분
 # (일반 원칙 리마인더라 fileset 키가 없음 — gate-nudge와 동형의 세션 sentinel).
 sid = d.get("session_id", "") or "nosession"
-sent = f"/tmp/claude-{os.getuid()}/workernudge-{sid}"
+# Windows 이식성(2026-07-18): os.getuid() POSIX 전용·/tmp→C:\tmp 오해석 → gettempdir()+getuid 폴백(POSIX 불변).
+sent = os.path.join(tempfile.gettempdir(), f"claude-{getattr(os, 'getuid', lambda: 0)()}", f"workernudge-{sid}")
 try:
     os.makedirs(os.path.dirname(sent), exist_ok=True)
     if os.path.exists(sent):

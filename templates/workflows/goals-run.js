@@ -37,6 +37,11 @@ const STATUS_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['done', 'actionable', 'counts'],
   properties: {
     done: { type: 'boolean' },
+    // ksi-goals status --json이 내보내는 정지/완료 술어 — additionalProperties:false라 여기 안 나열하면
+    // haiku 구조화출력이 드롭한다(그래서 '전부 blocked'를 '완료'와 구분 못 함). 명시적으로 받는다.
+    blocked: { type: 'integer' },
+    all_completed: { type: 'boolean' },
+    quiescent: { type: 'boolean' },
     counts: { type: 'object', additionalProperties: true },
     actionable: {
       type: 'array', items: {
@@ -76,13 +81,38 @@ const readStatus = () =>
 
 const done = []
 const skipped = []       // red-lane·반복실패·blocked
+const recordFailures = [] // reviewer는 pass인데 원장이 completed로 봉인 안 됨(기록 실패) — 가짜완료 격리
 const attemptsById = {}
 let processed = 0
+let statusReadFailed = false  // 원장 상태 읽기 실패 — '완료'와 구분(가짜완료 방지)
+let carriedStatus = null      // 효율(0.8.3): pass 후 봉인재조회 결과를 다음 반복 top-read로 재사용(무변화 구간 중복 read 제거)
+
+// goal id는 원장 등록 시점에 형식검증되지만(ksi-goals _check_id), 오래된 원장·오염 대비 방어적 인용.
+// 정상 id(^[A-Za-z][A-Za-z0-9_.-]{0,63}$)는 그대로, 이례적이면 single-quote로 감싸 shell 보간을 무력화.
+const qid = (id) => (/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(String(id)) ? String(id) : `'${String(id).replace(/'/g, "'\\''")}'`)
+// 자유텍스트 인자(evidence_ref·reason)를 bash에 안전하게 single-quote — JSON.stringify(이중따옴표)는 bash에서
+// $(...)·백틱을 여전히 평가해 워커 산출물이 명령치환 페이로드를 실으면 실행될 수 있다. single-quote는 그 전부를 리터럴화.
+const shq = (s) => `'${String(s == null ? '' : s).replace(/'/g, "'\\''")}'`
 
 while (processed < maxGoals) {
-  const st = await readStatus()
-  if (!st || st.done || !(st.actionable || []).length) {
-    log(`원장 actionable 0 — 완료(원장 상태 기준, 모델 선언 아님).`)
+  // .catch(null): agent가 throw(null 반환이 아니라)해도 워크플로 abort 대신 statusReadFailed→degraded 경로로.
+  // carriedStatus: 직전 pass의 봉인재조회 결과가 있으면(원장 무변화) 그것을 재사용해 중복 top-read 스킵(효율 0.8.3).
+  const st = carriedStatus || await readStatus().catch(() => null)
+  carriedStatus = null
+  // 상태 읽기 실패(null)를 '완료(actionable 0)'와 섞지 않는다 — 예전엔 CLI/파싱/agent 실패가 전부
+  // '완료' 경로로 빠져 미완 원장을 완료로 오해했다(green≠작동). 실패는 DEGRADED로 안전 중단.
+  if (!st) {
+    statusReadFailed = true
+    log(`⚠ 원장 상태 읽기 실패(null 반환) — DEGRADED, 안전 중단(완료로 오해 금지). goal-status로 수동 확인 필요.`)
+    break
+  }
+  if (st.done || !(st.actionable || []).length) {
+    // '완료'와 '멈췄으나 blocked 잔존(사람 대기)'을 구분해 로그 — 전부 blocked를 완료로 오해하지 않게(술어 소비).
+    if (st.quiescent || (st.blocked && !st.all_completed)) {
+      log(`원장 actionable 0 — 단, blocked ${st.blocked || '?'}건이 남아 '완료'가 아니라 사람 대기(quiescent). goal-status로 확인.`)
+    } else {
+      log(`원장 actionable 0 — 완료(원장 상태 기준, 모델 선언 아님)${st.all_completed ? ' · 전부 completed' : ''}.`)
+    }
     break
   }
   // 아직 skip 안 한 것 중 다음
@@ -114,10 +144,10 @@ while (processed < maxGoals) {
 완료기준: ${(next.criteria || []).join(' / ') || '(명시 없음 — title 기준 합리적 판단)'}
 
 임무: 이 목표를 실제로 구현한다(코드 변경·테스트). 규율:
-- 먼저 Bash로 \`${G} start --id ${next.id}\`(이미 in_progress면 무해).
+- 먼저 Bash로 \`${G} start --id ${qid(next.id)}\`(이미 in_progress면 무해 — 멱등).
 - 실제 코드를 읽고 변경하라(Edit/Write). "green≠작동" — 테스트·타입체크를 실제로 돌려 통과를 확인하고, 픽스처가 실제 흐름을 우회하지 않는지 본다.
 - **되돌리기 어렵거나 외부영향(push·배포·DB 마이그레이션 실행·비밀변경·외부전송·자금경로)이면 그 부분은 하지 말고 self_status='needs_human'으로 반환**(이 루프는 그런 걸 자동 실행하지 않는다).
-- 끝나면 \`${G} attempt --id ${next.id} --evidence "<검증한 실제 근거>"\`로 증거를 원장에 기록(이게 있어야 게이트가 돈다).
+- 끝나면 \`${G} attempt --id ${qid(next.id)} --evidence "<검증한 실제 근거>"\`로 증거를 원장에 기록(이게 있어야 게이트가 돈다).
 - evidence_ref엔 reviewer가 재확인할 수 있는 구체 근거(file:line·테스트 출력)를 담아라 — 추측·자기선언 금지.`,
     { label: `work:${next.id}`, phase: 'Run', model: 'sonnet', schema: WORK_SCHEMA })
 
@@ -128,7 +158,7 @@ while (processed < maxGoals) {
     continue
   }
   if (work.self_status === 'blocked') {
-    await agent(`Bash로 실행: \`${G} block --id ${next.id} --reason ${JSON.stringify((work.block_reason || 'dependency').slice(0, 120))}\``, { label: `block:${next.id}`, phase: 'Run', model: 'haiku' }).catch(() => {})
+    await agent(`Bash로 실행: \`${G} block --id ${qid(next.id)} --reason ${shq((work.block_reason || 'dependency').slice(0, 120))}\``, { label: `block:${next.id}`, phase: 'Run', model: 'haiku' }).catch(() => {})
     skipped.push({ id: next.id, title: next.title, why: 'blocked: ' + (work.block_reason || '') })
     continue
   }
@@ -146,12 +176,27 @@ worker가 댄 증거: ${work.evidence_ref}
 
   const verdict = (gate && gate.verdict) || 'degraded'
   // 게이트 결과를 원장에 기록(pass만 completed로 봉인 — 코드가 강제). reviewer 라벨은 실제 검증 tier.
-  await agent(`Bash로 실행(그대로): \`${G} gate --id ${next.id} --verdict ${verdict} --reviewer reviewer-opus --evidence-ref ${JSON.stringify((work.evidence_ref || '').slice(0, 160))}\`\n출력을 그대로 반환.`,
-    { label: `record:${next.id}`, phase: 'Run', model: 'haiku' }).catch(() => {})
+  const recordOut = await agent(`Bash로 아래를 그대로 실행하고 표준출력을 **가공 없이 그대로** 반환하라(성공 시 "completed" 문구·실패 시 에러 메시지):\n\`${G} gate --id ${qid(next.id)} --verdict ${verdict} --reviewer reviewer-opus --evidence-ref ${shq((work.evidence_ref || '').slice(0, 160))}\``,
+    { label: `record:${next.id}`, phase: 'Run', model: 'haiku' }).catch((e) => `__record_error__: ${(e && e.message) || e}`)
 
   if (verdict === 'pass') {
-    done.push({ id: next.id, title: next.title })
-    log(`✓ [${next.id}] 게이트 통과 → completed.`)
+    // 가짜완료 방지(green≠작동): reviewer가 pass여도 원장이 실제 completed로 봉인됐는지 **재조회로 확인** 후에만 done.
+    // 예전엔 기록 실패(.catch로 삼킴)를 무시하고 done.push해, 원장은 in_progress인데 워크플로는 completed를 반환했다.
+    // pass가 봉인되면 그 목표는 completed로 빠져 actionable에서 사라진다 → 재조회 actionable 부재로 봉인 확인.
+    const after = await readStatus().catch(() => null)
+    const stillActionable = !!(after && (after.actionable || []).some((g) => g.id === next.id))
+    if (after && !stillActionable) {
+      done.push({ id: next.id, title: next.title })
+      log(`✓ [${next.id}] 게이트 통과 → 원장 completed 봉인 확인.`)
+      carriedStatus = after  // 무변화 구간 — 다음 반복 top-read로 재사용(중복 원장 read 제거)
+    } else {
+      recordFailures.push({
+        id: next.id, title: next.title,
+        why: after ? '기록 후에도 원장이 completed 아님(gate CLI 실패 추정 — 예: evidence 누락)' : '기록 후 원장 재조회 실패',
+        record_out: String(recordOut).slice(0, 200),
+      })
+      log(`⚠ [${next.id}] reviewer pass였으나 원장 봉인 미확인 → DEGRADED(가짜완료 방지, done 아님). 기록출력: ${String(recordOut).slice(0, 120)}`)
+    }
   } else {
     log(`✗ [${next.id}] ${verdict} — ${(gate && gate.reason || '').slice(0, 100)} (원장에 남아 재시도/사람)`)
     // refuted/degraded면 다음 루프에서 같은 목표 재선택 → attempt 카운터가 무한루프 방지.
@@ -164,12 +209,18 @@ if (processed >= maxGoals && remaining && remaining !== 0) {
   log(`⏸ 세션 예산(${maxGoals}) 도달 — 남은 actionable ${remaining}개는 다음 세션이 이어간다(원장이 SSOT, 마라톤 방지 suspend).`)
 }
 if (skipped.length) log(`⚠ 사람 처리 필요 ${skipped.length}건(red-lane/반복실패/needs_human) — 아래 목록.`)
+if (recordFailures.length) log(`⚠ DEGRADED: ${recordFailures.length}건은 reviewer pass였으나 원장 봉인 미확인(가짜완료 방지 — done 아님). 수동 확인 필요.`)
+if (statusReadFailed) log(`⚠ DEGRADED: 원장 상태 읽기 실패로 조기 중단 — 완료 판단 보류.`)
 
 return {
   project: DIR,
   completed_this_session: done,
   needs_human: skipped,
+  record_failures: recordFailures, // reviewer pass인데 원장이 completed로 봉인 안 된 건(가짜완료 격리)
   remaining_actionable: remaining,
   suspended: processed >= maxGoals && remaining !== 0,
-  note: '완료=reviewer 게이트통과만(원장 상태 기준). red-lane·되돌리기 어려운 건 자동 실행 안 하고 needs_human으로 격리. 다음 세션은 goal-status.sh가 복원.',
+  // green≠작동: 기록 실패·상태읽기 실패가 있으면 낙관 top-line 보류(위임자가 완료로 relay 금지).
+  degraded: recordFailures.length > 0 || statusReadFailed,
+  status_read_failed: statusReadFailed,
+  note: '완료=reviewer 게이트통과 AND 원장 completed 봉인 확인만(green≠작동). red-lane·되돌리기 어려운 건 자동 실행 안 하고 needs_human으로 격리. 다음 세션은 goal-status.sh가 복원.',
 }

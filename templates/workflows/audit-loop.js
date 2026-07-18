@@ -10,7 +10,8 @@ export const meta = {
 //  verify 실패(throw/rate-limit) = 'error' → degraded[]에 격리, counts에 confirmed로 세지 않음, return.degraded=true.
 //  analyze 실패 = 해당 unit은 coveredUnits에서 제외하고 units_analyze_failed[]에 격리(위장 커버리지 금지) → return.degraded=true.
 //  critic 호출 실패(throw) = critic_failed=true(완성도 재점검 미수행) → return.degraded=true.
-//  reviewer agentType 폴백(agentType 실패→opus model 폴백)은 성공 경로이나 counts.reviewer_fallbacks로 가시화(degraded 미반영).
+//  reviewer agentType 폴백 = agentType 미등록/미상 오류만 opus model로 폴백(counts.reviewer_fallbacks). 일시적 오류(rate-limit/timeout)는 폴백 대신 DEGRADED로 격리(rate-limit 악화 방지).
+//  return findings = verified+unverified union(하위호환). 'reviewer 통과'만 원하면 verified_findings(=confirmed/adjust). unverified_findings=verify 미트리거(정책 skip, 미검증).
 //  정지       = critic 무소득 또는 round == maxRounds(기본 2 · 천장 4, dial). 남은 미탐색 단위 = units_deferred.
 //  tier       = analyze:sonnet(dial, unit별 model override 가능) · verify/critic:reviewer(opus·xhigh·read-only, 부재 시 opus 폴백).
 // ====
@@ -41,7 +42,9 @@ const verifyModel = A.verifyModel || 'opus'
 const criticModel = A.criticModel || 'opus'
 const maxRounds = Math.max(1, Math.min(4, A.maxRounds || 2))
 const verifySev = Array.isArray(A.verifySeverities) ? A.verifySeverities : ['critical', 'high']
-const useCritic = A.critic !== false
+// critic auto-scale(0.8.3): 소규모 감사(≤2 유닛)엔 critic 기본 off — caller가 opt-out을 기억 안 해도 opus critic 낭비 없음.
+// 명시 지정(A.critic)은 항상 존중. 스킬 §0의 '소규모=critic:false' 권고를 워크플로에 baked-in.
+const useCritic = A.critic === undefined ? units0.length > 2 : A.critic !== false
 // batchSize: 한 라운드의 analyze fan-out을 N개 단위씩 끊어 실행(청크 사이 barrier) — 동시
 // 실행 에이전트 수를 줄여 API rate-limit(TPM/ITPM) cascade 실패를 회피. 기본=전체(끊지 않음, 종전 동작).
 let batchSize = A.batchSize
@@ -55,13 +58,26 @@ const reviewerAgent = A.reviewerAgent === undefined ? 'reviewer' : A.reviewerAge
 // verify가 silent no-op(미검증 finding을 그냥 confirmed)으로 무너지지 않게(가짜 green 방지).
 let reviewerFallbacks = 0
 let reviewerFallbackWarned = false
+// 오류 분류(2026-07-18): 예전엔 agentType 실패 시 '무조건' opus 모델로 폴백해, rate-limit/timeout류
+// 일시적 오류에도 같은 비싼 opus를 즉시 재호출 → rate-limit을 되레 악화시켰다. 일시적 오류는 폴백하지 말고
+// rethrow해 상위(verifyOne/critic)가 DEGRADED로 격리하게 하고, agentType 미등록/미상 오류만 opus로 폴백
+// (verify가 silent no-op으로 무너져 미검증 finding을 confirmed로 흘리는 것 방지). read-only/effort 고정 상실은 폴백의 알려진 대가.
+const TRANSIENT_RE = /rate.?limit|429|overloaded|529|503|timeout|timed out|too many requests|quota|session (?:limit|token)|context (?:window|length)|network|ECONN|ETIMEDOUT/i
+const isTransientErr = (e) => {
+  // 구조화 필드 우선(runtime이 rate-limit을 message가 아니라 e.status=429·e.code로만 노출할 수 있음) → 텍스트 폴백.
+  const st = e && (e.status ?? e.statusCode ?? e.code)
+  if (st === 429 || st === 503 || st === 529 || st === '429' || st === '503' || st === '529') return true
+  return TRANSIENT_RE.test(String((e && (e.message || (e.toString && e.toString()))) || e || ''))
+}
 const reviewAgent = (prompt, label, phase, schema, fallbackModel) =>
   reviewerAgent
-    ? agent(prompt, { label, phase, schema, agentType: reviewerAgent }).catch(() => {
+    ? agent(prompt, { label, phase, schema, agentType: reviewerAgent }).catch((e) => {
+        if (isTransientErr(e)) throw e // 일시적(rate-limit/timeout) → 폴백 금지, 상위가 DEGRADED로 격리(rate-limit 악화 방지)
+        // 비-일시적(agentType 미등록 등 영구오류) → opus 모델 폴백(verify가 silent no-op으로 무너지지 않게)
         reviewerFallbacks++
         if (!reviewerFallbackWarned) {
           reviewerFallbackWarned = true
-          log(`⚠ reviewer agentType 실패 → opus 모델 폴백(effort 고정 상실 가능)`)
+          log(`⚠ reviewer agentType 폴백 → opus 모델(effort/read-only 고정 상실 가능). 일시적 오류는 폴백 대신 DEGRADED로 격리.`)
         }
         return agent(prompt, { label, phase, schema, model: fallbackModel })
       })
@@ -256,6 +272,12 @@ const rank = { critical: 0, high: 1, medium: 2, low: 3 }
 confirmed.sort((a, b) => (rank[a.final_severity] ?? 9) - (rank[b.final_severity] ?? 9))
 degraded.sort((a, b) => (rank[a.final_severity] ?? 9) - (rank[b.final_severity] ?? 9))
 
+// verified/unverified 분리(2026-07-18): confirmed[]에는 reviewer가 실제 통과시킨 것(confirmed/adjust)과,
+// verifySeverities 미해당이라 애초에 verify를 안 돌린 것(unverified, medium/low 정책 skip)이 섞여 있었다.
+// findings만 보는 소비자가 unverified를 '검증 완료'로 오해하지 않도록 별도 배열로 분리해 노출(findings는 하위호환 union 유지).
+const verifiedFindings = confirmed.filter((f) => f.verify_state === 'confirmed' || f.verify_state === 'adjust')
+const unverifiedFindings = confirmed.filter((f) => f.verify_state === 'unverified')
+
 // LOOP CONTRACT: degraded(verify 실패)가 1건이라도 있으면 결과는 DEGRADED — 위임자는 낙관 top-line을 보류한다.
 if (degraded.length) log(`⚠ DEGRADED: ${degraded.length}건이 verify 실패로 미검증 — confirmed로 세지 않음. 낙관 결론 보류 권장.`)
 if (analyzeFailed.length) log(`⚠ DEGRADED: analyze 실패 ${analyzeFailed.length}개 단위 미커버(units_analyze_failed) — 낙관 결론 보류 권장.`)
@@ -270,7 +292,8 @@ return {
   units_analyze_failed: analyzeFailed, // analyze 실패로 커버리지에서 제외된 unit.key(H1 — 위장 covered 방지)
   units_deferred: pending.map((u) => u.key),
   counts: {
-    confirmed: confirmed.length,
+    confirmed: confirmed.length, // 하위호환: verified+unverified union 크기(분해는 verified_findings/unverified_findings 배열)
+    // 주의: 'verified' 리프명은 아래 by_verdict.verified(confirmed-only)와 값이 달라(여기+adjust) 충돌하므로 top-level엔 두지 않음.
     refuted: refuted.length,
     verify_failed: degraded.length,
     reviewer_fallbacks: reviewerFallbacks,
@@ -287,7 +310,9 @@ return {
       low: confirmed.filter((f) => f.final_severity === 'low').length,
     },
   },
-  findings: confirmed,
+  findings: confirmed, // 하위호환 union(verified+unverified). '검증됨'만 원하면 verified_findings를 써라.
+  verified_findings: verifiedFindings,     // reviewer 통과(confirmed/adjust) — 'confirmed'는 이것에만 정확히 대응
+  unverified_findings: unverifiedFindings, // verify 미트리거(정책 skip) — 실재는 미검증, 소비 시 그대로 신뢰 금지
   degraded_findings: degraded, // verify 실패로 미검증 — 별도 추적(confirmed와 분리)
   refuted,
 }

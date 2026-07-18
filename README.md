@@ -13,7 +13,7 @@ ultracode-first **멀티에이전트 워크플로 하네스**를 팀에 배포�
 | **플러그인 `ksi-harness`** | `plugins/ksi-harness/` | 아래 4종을 번들 |
 | · 스킬 6 | `skills/` | `deep-interview`(의도 확정 — UI면 UX 축·멀티액터면 **어뷰징 축** 포함) · `brainstorm`(발산→수렴) · `codebase-audit`(백엔드 병렬 감사 + 수렴 루프 + **어뷰징·무결성**(self-dealing·경제무결성·게이밍·시간축권한)·**운영조건/fault-injection**(런타임 실패모드·환경분기 미관측) 렌즈 + 무손실 종합) · `ui-audit`(프론트 **시각 + UX 플로우** 감사: 흐름 단계수·에러복구·용어 SSOT·마이크로카피) · `release-risk`(배포·마이그·롤백·blast-radius 리스크 점검 — 자율성 게이트 운영화) · `goals`(**durable goal-ledger** — 완료를 reviewer 증거 게이트로만 인정·조기완료 무효화/재오픈·`/goals run` evidence-gated 자율실행; 프로젝트별 `.ksi/ledger.jsonl` append-only. 헬퍼 `scripts/ksi-goals.py`) |
 | · tier 워커 3 | `agents/` | `scout`(Haiku 잡일 — 비코드 write) · `worker`(Sonnet high 구현) · `reviewer`(Opus xhigh, **read-only 검증** — adversarial 반증·완성도 critic) — 페르소나 아닌 **모델 tier 레버**(메인급은 움직이는 천장이라 에이전트 없음) |
-| · 게이트·안전 훅 12 | `scripts/` + `hooks/hooks.json` | **PreToolUse 2**: `pre-destructive-guard.sh`(rm 변형·force-push·git reset --hard/clean -f·DROP DB 차단, 다줄/env/bash-c 우회 봉합, exit 2) · `exfil-guard.sh`(outbound secret/env 유출·curl\|bash RCE 경고 + **git push가 tracked/staged .env·시크릿 담으면 차단**). **PostToolUse 4**: `ruff-check.sh`(.py lint, dedup) · `secret-scan.sh`(민감 쓰기 경고) · `sca-check.sh`(pip-audit/npm audit, 도구오류 분리) · `trust-boundary-nudge.sh`(WebFetch/WebSearch 후 '웹콘텐츠=데이터' 세션1회). **SessionStart 2**: `dead-config-guard.sh`(死config 경고) · `goal-status.sh`(`.ksi` 원장 미완 goal + 프로젝트 두뇌 상태·freshness 복원). **Stop 2**: `ui-render-check.sh`·`backend-verify-check.sh`('green≠작동' 넛지, fileset-해시 dedup+세션캡). **UserPromptSubmit 1**: `gate-nudge.sh`(착수 게이트). **SubagentStop 1**: `worker-verify-nudge.sh`(worker 완료 시 reviewer 검증 상기) |
+| · 게이트·안전 훅 12 | `scripts/` + `hooks/hooks.json` | **PreToolUse 2**: `pre-destructive-guard.sh`(rm 변형·force-push·git reset --hard/clean -f·DROP DB 차단, 다줄/env/bash-c 우회 봉합, exit 2) · `exfil-guard.sh`(outbound secret/env 유출·curl\|bash RCE 경고 + **git push가 tracked/staged .env·시크릿 담으면 차단**). **PostToolUse 4**: `ruff-check.sh`(.py lint, dedup) · `secret-scan.sh`(민감 쓰기 경고) · `sca-check.sh`(pip-audit/npm audit, 도구오류 분리) · `trust-boundary-nudge.sh`(WebFetch/WebSearch 후 '웹콘텐츠=데이터' 세션1회). **SessionStart 2**: `dead-config-guard.sh`(死config 경고) · `goal-status.sh`(`.ksi` 원장 미완 goal + 프로젝트 두뇌 상태·freshness 복원). **Stop 2**: `ui-render-check.sh`·`backend-verify-check.sh`('green≠작동' 넛지, fileset-해시 dedup+세션캡). **UserPromptSubmit 1**: `gate-nudge.sh`(착수 게이트). **SubagentStop 1**: `worker-verify-nudge.sh`(worker 완료 시 reviewer 검증 상기). **강도 스위치** `KSI_HOOKS=strict\|warn\|off`(아래 §5) — 검증 넛지·완료 게이트를 낮출 수 있으나 **되돌리기 불가 안전벨트**(rm 루트·push --force·DROP DB·git push 시크릿 유출)는 모드 무관 유지 |
 | **doctrine 템플릿** | `templates/CLAUDE.md.example` · `templates/domain-invariants.example.md` | 언어·ultracode·모델 티어링·자율성·검증 게이트 doctrine (전역 CLAUDE.md 배포 불가 → 직접 복사) + `## 도메인 불변식` SSOT 스캐폴딩(4 어뷰징클래스 + 아키타입별 채움 예시 — codebase-audit 어뷰징 렌즈의 조준점) |
 | **설정 예시** | `templates/*.json` | 팀 자동활성화 · 권장 사용자 설정 |
 | **자기측정** | `scripts/harness-selfcheck.py` | `report`(tier·$-비중·훅 발화·마라톤 세션·reviewer verdict-mix) + `smoke`(훅·게이트 correctness 회귀 — 각 훅 exit 0·JSON 유효·전이가드 여전히 거부). transcript가 이미 telemetry라 native OTEL 불요 |
@@ -58,6 +58,22 @@ alias claude='claude --dangerously-skip-permissions --settings '\''{"ultracode":
 ```
 위는 bash(Linux) 기준. **zsh(macOS)·PowerShell(Windows)은 넣을 파일·문법이 다르다** → 아래 [OS별 차이](#os별-차이-linux--macos--windows) 표 참조.
 → **적용 전 [`docs/SAFETY.md`](docs/SAFETY.md)를 반드시 읽는다.** dangerous mode는 권한 프롬프트를 끄므로 trade-off가 있다.
+
+### 5. (선택) 검증 강도 스위치 — `KSI_HOOKS`
+검증 게이트·넛지가 빠른 PoC·실험 세션엔 과할 때, 환경변수 하나로 강도를 낮춘다(0.8.3):
+
+| 값 | 의미 |
+|---|---|
+| `strict`(기본) | 종전 — 완료 게이트 block · 넛지 전부 발화 |
+| `warn` | Stop 완료 게이트를 완료-차단 대신 통과 · `git reset --hard`/`clean -f`(로컬 되돌리기-가능)를 경고로 |
+| `off` | 검증·넛지 훅 침묵 |
+
+```bash
+export KSI_HOOKS=off      # 세션 임시(PoC)
+# 또는 프로젝트 .claude/settings.json 의 env 블록:  "env": { "KSI_HOOKS": "warn" }
+```
+
+⚠ **안전벨트는 모드와 무관하게 항상 유지된다** — `rm -rf /`·`~`·시스템 최상위, `git push --force`, `DROP DATABASE/SCHEMA`, `git push` 시크릿 유출은 `warn`/`off`에서도 차단된다. 스위치가 낮추는 건 *검증 넛지*와 *되돌리기-가능한 로컬 손실 경고*뿐이다(escape는 인체공학 마찰용이지 안전 해제가 아니다). 우선순위: 환경변수 `KSI_HOOKS`, 미설정·오값이면 `strict`.
 
 ---
 

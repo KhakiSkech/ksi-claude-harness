@@ -10,25 +10,80 @@ OMX ultragoal 패턴 포팅: 프로젝트별 .ksi/{goals.json(상태), ledger.js
 
 이 스크립트는 '상태 I/O'만 결정론적으로 한다. evidence gate의 *판정*(reviewer adversarial 검증)은
 /goals 스킬이 오케스트레이션하고, 그 결과만 `gate` 명령으로 기록한다(헬퍼는 reviewer를 부르지 않음).
-코드 강제: 증거 없는 pass 불가 · pass엔 --reviewer/--evidence-ref 필수(자기선언 차단) · 전이 가드(ALLOWED — completed는 invalidate로만) · refuted/degraded는 증거 클리어.
-가정: .ksi/goals.lock(fcntl.flock 배타락)으로 load~save 구간을 프로세스 간 직렬화 — 동시 invocation의 lost-update를 방지
-      (flock은 POSIX 로컬 파일시스템 전제 — NFS 등 비POSIX 락 환경은 미보장).
+코드 강제: 증거 없는 pass 불가 · pass엔 --reviewer/--evidence-ref 필수(자기선언 차단) · 전이 가드(ALLOWED — completed는 invalidate로만) · refuted/degraded는 증거 클리어 · id 형식검증(shell-inject 표면 축소).
+가정: .ksi/goals.lock 배타락으로 load~save 구간을 프로세스 간 직렬화 — 동시 invocation의 lost-update를 방지
+      (POSIX=fcntl.flock · Windows=msvcrt.locking · 둘 다 없으면 best-effort no-op. NFS 등 비POSIX 락 환경은 미보장).
 
 사용: ksi-goals.py <command> [opts]   (CWD의 .ksi/ 대상, --dir로 변경)
 """
 import argparse
 import datetime
-import fcntl
 import json
 import os
+import re
 import sys
+
+# --- cross-platform 파일락(2026-07-18): fcntl은 POSIX 전용이라 Windows Python에서 `import fcntl`이
+#     ModuleNotFoundError로 스크립트 전체를 죽였다(goal-ledger가 Windows에서 통째로 무력). 플랫폼별로 분기하되
+#     동작(load~save 직렬화)은 불변. 어느 것도 없으면 락을 포기하지 말고 best-effort no-op(단일 사용자 dev에선 충분).
+try:
+    import fcntl
+
+    def _lock_ex(f):
+        fcntl.flock(f, fcntl.LOCK_EX)
+
+    def _unlock(f):
+        fcntl.flock(f, fcntl.LOCK_UN)
+except ImportError:  # Windows
+    try:
+        import msvcrt
+
+        def _lock_ex(f):
+            # msvcrt.locking은 현재 위치부터 nbytes 잠금(EOF 초과 허용). 블로킹 재시도 후 실패 시 예외 — 짧은 임계구역이라 수용.
+            try:
+                f.write("x")
+                f.flush()
+                f.seek(0)
+            except Exception:
+                pass
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+            except OSError:
+                pass  # 락 획득 실패(경합/재시도 소진) — 진행은 하되 직렬화 미보장(best-effort)
+
+        def _unlock(f):
+            try:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+    except ImportError:  # 최후 폴백 — 락 없음(best-effort)
+        def _lock_ex(f):
+            pass
+
+        def _unlock(f):
+            pass
+
+
+# goal/risk id 형식 — 쉘 명령에 보간되는 값이라 메타문자를 원천 차단(오케스트레이터가 인용해도 등록 시점 검증이 방어선).
+# \Z(문자열 끝)로 앵커 — `$`는 Python re에서 후행 개행 1개를 허용(id 'G1\n' 통과)하는 gotcha가 있어 개행 주입 표면이 남는다.
+ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}\Z")
+
+
+def _check_id(gid, kind="goal"):
+    if not ID_RE.match(gid or ""):
+        sys.exit(f"{kind} id '{gid}' 형식 위반 — 영문자로 시작, 영숫자/_/-/. 만, 64자 이내(shell-inject 방지)")
+
 
 STATES = ("proposed", "in_progress", "blocked", "completed", "false_positive_complete", "abandoned")
 MARK = {"completed": "✓", "false_positive_complete": "✗재오픈", "abandoned": "—",
         "blocked": "⏸", "in_progress": "▶", "proposed": "·"}
 # 허용 전이(현재상태 → 명령). 이 외엔 거부 — completed는 invalidate로만 빠져나간다(가짜완료 감사추적 우회 차단).
 ALLOWED = {
-    "start": ("proposed", "blocked"),
+    # start는 in_progress에서도 허용(idempotent) — goals-run.js가 재시도마다 start를 재호출하는데(refuted 후 목표가
+    # in_progress로 남음) 이를 거부하면 자율 루프가 매 재시도에서 헛발화 에러를 냈다(2026-07-18). start는 status만
+    # in_progress로 (재)설정하고 evidence/attempt를 건드리지 않아 재실행이 무해하다.
+    "start": ("proposed", "blocked", "in_progress"),
     "block": ("in_progress",),
     "attempt": ("in_progress",),
     "gate": ("in_progress",),
@@ -51,7 +106,7 @@ def state_path(d):
 
 
 def git_head(d):
-    """프로젝트 dir의 현재 git HEAD 짧은 sha(없으면 None) — state freshness 스탬프용."""
+    """프로젝트 dir의 현재 git HEAD 짧은 sha(없으면 None) — state freshness 스탬프용(전체 폴백)."""
     import subprocess
     try:
         r = subprocess.run(["git", "-C", d, "rev-parse", "--short", "HEAD"],
@@ -59,6 +114,34 @@ def git_head(d):
         return r.stdout.strip() if r.returncode == 0 else None
     except Exception:
         return None
+
+
+def git_module_sha(d, module):
+    """모듈 경로에 한정된 마지막 커밋 sha — 모듈별 freshness(전체 HEAD 비교의 과탐 교정).
+    module이 실제 경로가 아니거나(논리 모듈명) 이력이 없으면 None → 호출측이 전체 HEAD 폴백."""
+    import subprocess
+    if not module or not str(module).strip():
+        return None
+    try:
+        r = subprocess.run(["git", "-C", d, "log", "-1", "--format=%h", "--", str(module).strip()],
+                           capture_output=True, text=True, timeout=5)
+        sha = r.stdout.strip()
+        return sha if (r.returncode == 0 and sha) else None
+    except Exception:
+        return None
+
+
+def git_module_dirty(d, module):
+    """모듈 경로에 커밋 안 된 변경(staged/unstaged/untracked)이 있으면 True — HEAD가 안 바뀐 작업트리 변경도 stale로 잡음."""
+    import subprocess
+    if not module or not str(module).strip():
+        return False
+    try:
+        r = subprocess.run(["git", "-C", d, "status", "--porcelain", "--", str(module).strip()],
+                           capture_output=True, text=True, timeout=5)
+        return r.returncode == 0 and bool(r.stdout.strip())
+    except Exception:
+        return False
 
 
 def load(gp):
@@ -183,6 +266,15 @@ def build_parser():
 
 RISK_STATES = ("open", "accepted", "resolved", "regressed")
 RISK_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+# risk도 goal처럼 전이 가드 — 임의 상태로 점프 금지(open→regressed·resolved→accepted 등 무의미 전이 차단).
+#   accept  = open/regressed 인 리스크만 baseline 수용
+#   resolve = open/regressed 인 리스크만 해소(증거 필수)
+#   reopen  = accepted/resolved 된 리스크만 재발(regression)
+RISK_ALLOWED = {
+    "accepted": ("open", "regressed"),
+    "resolved": ("open", "regressed"),
+    "regressed": ("accepted", "resolved"),
+}
 
 
 def _risks(data):
@@ -197,11 +289,15 @@ def _find_risk(data, rid):
 
 
 def cmd_risk_add(data, gp, lp, args):
+    _check_id(args.id, "risk")
     if _find_risk(data, args.id):
         sys.exit(f"risk '{args.id}' 이미 존재")
     _risks(data).append({
         "id": args.id, "title": args.title, "lens": args.lens, "severity": args.severity,
-        "status": "open", "note": args.note, "accept_reason": None, "evidence_ref": None,
+        "status": "open", "note": args.note,
+        # 전이별 근거를 분리 저장(예전엔 accept_reason 한 칸에 accept·reopen 사유가 섞여 감사추적이 뭉갰다).
+        "accept_reason": None, "resolve_evidence": None, "reopen_reason": None,
+        "previous_status": None,
         "created_at": now(), "updated_at": now(),
     })
     log(lp, "risk_add", args.id, lens=args.lens, severity=args.severity)
@@ -209,17 +305,23 @@ def cmd_risk_add(data, gp, lp, args):
     print(f"✓ risk 기록: {args.id} [{args.severity}/{args.lens}] (open — fix는 goal로 register, 수용은 risk-accept)")
 
 
-def _risk_transition(data, gp, lp, rid, to, *, reason=None, evidence=None):
+def _risk_transition(data, gp, lp, rid, to, *, reason=None, evidence=None, reason_field="accept_reason"):
     r = _find_risk(data, rid)
     if not r:
         sys.exit(f"risk '{rid}' 없음")
+    cur = r.get("status", "open")
+    allowed = RISK_ALLOWED.get(to)
+    if allowed and cur not in allowed:
+        sys.exit(f"risk {rid}: '{cur}'→'{to}' 전이 불가 — 허용 출발상태: {', '.join(allowed)}")
+    r["previous_status"] = cur
     r["status"] = to
     r["updated_at"] = now()
     if reason is not None:
-        r["accept_reason"] = reason
+        r[reason_field] = reason
     if evidence is not None:
-        r["evidence_ref"] = evidence
-    log(lp, f"risk_{to}", rid)
+        r["resolve_evidence"] = evidence
+    # ledger에 근거/증거를 남긴다(예전엔 이벤트+id만 남아 '왜 수용/재발했나'가 원장에서 사라졌다).
+    log(lp, f"risk_{to}", rid, from_status=cur, reason=reason, evidence_ref=evidence)
     save(gp, data)
     return r
 
@@ -261,7 +363,8 @@ def cmd_state_set(sp, d, module, status, note, audit_ref):
     st.setdefault("modules", {})
     st["modules"][module] = {
         "status": status, "note": note, "audit_ref": audit_ref,
-        "at_sha": git_head(d), "at": now(),
+        # at_sha=전체 HEAD(폴백·하위호환) · at_module_sha=이 모듈 경로에 한정된 마지막 커밋(정밀 freshness).
+        "at_sha": git_head(d), "at_module_sha": git_module_sha(d, module), "at": now(),
     }
     tmp = sp + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -278,8 +381,15 @@ def _state_load_with_freshness(sp, d):
     head = git_head(d)
     stale = []
     for mod, m in (st.get("modules") or {}).items():
-        # at_sha가 있고 현재 HEAD와 다르면 그 이후 코드가 바뀌었을 수 있음 = stale 후보.
-        if head and m.get("at_sha") and m["at_sha"] != head:
+        # 정밀: 모듈 경로에 한정된 sha가 있으면 그것만 비교(전체 HEAD 변경 하나로 모든 모듈이 stale 되던 과탐 교정)
+        #       + 커밋 안 된 작업트리 변경도 stale로 잡음(예전엔 HEAD 안 바뀌면 놓쳤다).
+        # 폴백: at_module_sha가 없으면(구 데이터·논리 모듈명) 종전 전체 HEAD 비교.
+        at_mod = m.get("at_module_sha")
+        if at_mod:
+            cur_mod = git_module_sha(d, mod)
+            if (cur_mod and cur_mod != at_mod) or git_module_dirty(d, mod):
+                stale.append(mod)
+        elif head and m.get("at_sha") and m["at_sha"] != head:
             stale.append(mod)
     return st, head, stale
 
@@ -328,7 +438,13 @@ def cmd_status(data, brief, as_json=False):
     )
     nxt = f"{actionable[0]['id']} {actionable[0]['title']}" if actionable else "(없음)"
     if as_json:
-        # goals-run.js가 소비: actionable 목록(다음 실행 대상)·counts·gate 통과 여부.
+        # goals-run.js가 소비: actionable 목록(다음 실행 대상)·counts·정지/완료 술어.
+        # 술어 분리(2026-07-18): 예전 `done`=actionable 0은 '전부 blocked'도 done=true라 '완료'로 오해됐다.
+        #   - done       : actionable(proposed/in_progress) 0 → 실행 루프의 정지 조건(blocked는 사람 대기라 action 불가).
+        #   - all_completed: 모든 목표가 completed(빈 원장은 false) → 진짜 '프로젝트 완료' 술어.
+        #   - quiescent  : actionable 0이지만 blocked가 남음 → 멈췄으나 미완(사람 개입 대기).
+        total = len(data["goals"])
+        completed_n = cnt.get("completed", 0)
         print(json.dumps({
             "project": data["project"],
             "counts": cnt,
@@ -339,7 +455,10 @@ def cmd_status(data, brief, as_json=False):
                  "evidence": x.get("evidence", "")}
                 for x in actionable
             ],
-            "done": len(actionable) == 0,  # 모든 목표가 게이트통과/blocked/abandoned = 원장이 완료 선언
+            "done": len(actionable) == 0,          # 실행 루프 정지 조건(action 가능 목표 없음)
+            "blocked": cnt.get("blocked", 0),
+            "all_completed": total > 0 and completed_n == total,   # 진짜 완료(전부 completed)
+            "quiescent": len(actionable) == 0 and cnt.get("blocked", 0) > 0,  # 멈췄으나 blocked 잔존
         }, ensure_ascii=False))
         return
     if brief:
@@ -372,7 +491,7 @@ def main():
     args = build_parser().parse_args()
     kdir, gp, lp = paths(args.dir)
 
-    # 동시성: load~save 구간을 .ksi/goals.lock(fcntl.flock 배타락)으로 직렬화.
+    # 동시성: load~save 구간을 .ksi/goals.lock 배타락으로 직렬화(POSIX=fcntl.flock · Windows=msvcrt.locking · _lock_ex 참조).
     # kdir이 아직 없고 init도 아니면(= .ksi 미초기화) 어차피 load()가 곧 sys.exit할 것이므로 락 불필요.
     lockfile = None
     if args.cmd == "init" or os.path.isdir(kdir):
@@ -383,7 +502,7 @@ def main():
             with open(gi, "w") as f:
                 f.write("goals.lock\n")
         lockfile = open(os.path.join(kdir, "goals.lock"), "w")
-        fcntl.flock(lockfile, fcntl.LOCK_EX)
+        _lock_ex(lockfile)
     try:
         if args.cmd == "init":
             if os.path.exists(gp):
@@ -420,7 +539,7 @@ def main():
             print(f"✓ risk {args.id} 해소 — 증거: {args.evidence_ref}")
             return
         if args.cmd == "risk-reopen":
-            _risk_transition(data, gp, lp, args.id, "regressed", reason=args.reason)
+            _risk_transition(data, gp, lp, args.id, "regressed", reason=args.reason, reason_field="reopen_reason")
             print(f"↻ risk {args.id} 재발(regression) — {args.reason}")
             return
         if args.cmd == "risk-list":
@@ -428,6 +547,7 @@ def main():
             return
 
         if args.cmd == "register":
+            _check_id(args.id, "goal")
             if any(x["id"] == args.id for x in data["goals"]):
                 sys.exit(f"goal '{args.id}' 이미 존재")
             if args.parent and not any(x["id"] == args.parent for x in data["goals"]):
@@ -514,7 +634,11 @@ def main():
             for part in (q for q in args.reopen.split(";") if q.strip()):
                 nid, _, ntitle = part.partition(":")
                 nid, ntitle = nid.strip(), ntitle.strip()
-                if nid and not any(y["id"] == nid for y in data["goals"]):
+                if nid and not ID_RE.match(nid):
+                    # reopen도 goal 생성 경로 — register/risk-add와 동일하게 id 형식검증(쉘 보간 표면 차단).
+                    # 여기선 abort 대신 skip(무효화 자체는 진행) — 잘못된 id 하나가 전체 invalidate를 막지 않게.
+                    skipped.append(nid + "(형식위반)")
+                elif nid and not any(y["id"] == nid for y in data["goals"]):
                     data["goals"].append(new_goal(nid, ntitle or nid, parent=args.id))
                     reopened.append(nid)
                 elif nid:
@@ -536,7 +660,7 @@ def main():
             print(f"— {args.id} abandoned")
     finally:
         if lockfile is not None:
-            fcntl.flock(lockfile, fcntl.LOCK_UN)
+            _unlock(lockfile)
             lockfile.close()
 
 

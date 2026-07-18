@@ -6,6 +6,8 @@
 #   있으면(=추적할 상태가 있는데 원장 미채택) '/goals init 권장' 1줄 넛지를 추가. 이걸로 '전체 분석해줘'를
 #   매번 재분석하는 마찰을 원장 채택으로 유도(발화는 여전히 조건부 — 아무 근거 없는 프로젝트엔 무음).
 set -uo pipefail
+. "$(dirname "$0")/ksi-mode.sh" 2>/dev/null || KSI_MODE=strict
+[ "${KSI_MODE:-strict}" = off ] && exit 0   # escape: off면 넛지 침묵(0.8.3)
 
 input="$(cat)"
 cwd="$(printf '%s' "$input" | python3 -c '
@@ -46,7 +48,7 @@ fi
 # 경로 B: 원장 없음 + docs/에 감사·로드맵·백로그류 md 존재 → 원장 채택 넛지(세션당 1회).
 # 추적할 상태가 문서로 흩어져 있는데 durable ledger가 없다는 신호 — 무근거 프로젝트엔 발화 안 함.
 CWD="$cwd" python3 -c '
-import os, glob, json, hashlib, sys
+import os, glob, json, hashlib, sys, tempfile
 cwd = os.environ.get("CWD","")
 if not cwd or not os.path.isdir(os.path.join(cwd, "docs")):
     sys.exit(0)
@@ -59,9 +61,9 @@ hits = sorted(set(hits))
 if not hits:
     sys.exit(0)
 # 세션당 1회 dedup — 프로젝트 경로 해시로 키(같은 프로젝트 재진입 시 반복 억제).
-uid = os.getuid()
+# Windows 이식성(2026-07-18): os.getuid() POSIX 전용·/tmp→C:\tmp 오해석 → gettempdir()+getuid 폴백(POSIX 불변).
 key = hashlib.sha1(cwd.encode()).hexdigest()[:8]
-sent = f"/tmp/claude-{uid}/goalnudge-{key}"
+sent = os.path.join(tempfile.gettempdir(), f"claude-{getattr(os, 'getuid', lambda: 0)()}", f"goalnudge-{key}")
 try:
     os.makedirs(os.path.dirname(sent), exist_ok=True)
     if os.path.exists(sent):

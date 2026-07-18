@@ -41,7 +41,7 @@ when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 �
 
 4. **adversarial 검증 + 완성도 critic → 재투입** — 각 critical/high finding(기본 — dial로 확장)을 *다른* 에이전트(**`reviewer` tier** — opus·xhigh·**구조적 read-only**: Bash 포함 write 계열 전부 tool 목록에서 제거, 상세는 reviewer.md frontmatter가 SSOT)가 같은 스크린샷으로 반증 시도(거짓양성·과장 제거). 살아남은 것만 채택. 인터랙티브 경로는 Task로 `subagent_type: reviewer` spawn.
    - **완성도 critic(reviewer):** 안 본 페이지·뷰포트·역할·빈/초과 상태가 남았나 1패스 재점검. **critic이 낸 새 결함도 위 adversarial verify를 한 번 더 통과시켜 채택**(critic 산출물 무검증 통과 금지), 남은 게 있고 상한(maxRounds, 기본값 SSOT=audit-loop.js LOOP CONTRACT) 내면 재캡처·재감사. codebase-audit §5와 대칭의 수렴 루프 — ui-audit이 선형이라 빠졌던 단계.
-   - **실행형 골격:** 감사·verify·critic 루프는 `~/.claude/workflows/audit-loop.js` 재사용(units=페이지/차원별 프롬프트+스크린샷 경로, context=design-side spec+제품 맥락). 캡처(§2)는 골격 밖에서 먼저.
+   - **실행형 골격:** §0 재사용 루프 골격 참조(audit-loop.js — 캡처(§2)는 골격 밖에서 먼저).
 
 5. **구조적 처방** — 여러 페이지에 반복되는 결함은 페이지별 땜질이 아니라 **공유 프리미티브로 한 번에**: `PageHeader` / `ResponsiveTable`(모바일 reflow) / `EmptyState` / 라벨 맵(SSOT). 일관성을 노력이 아니라 구조로 강제.
 

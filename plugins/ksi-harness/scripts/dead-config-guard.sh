@@ -29,7 +29,7 @@ base = str(env.get("ANTHROPIC_BASE_URL", "") or "")
 low = base.lower()
 if base and ("11434" in base or "ollama" in low or "localhost" in low or "127.0.0.1" in base):
     issues.append("ANTHROPIC_BASE_URL=%s → 죽은 로컬 LLM 엔드포인트로 강제(로컬 LLM 미사용 SSOT 위반 — Claude 호출이 실패하거나 엉뚱한 곳으로 감)" % base)
-# bypassPermissions 경고 제거(0.8.3): 이건 死config가 아니라 신뢰 환경에서의 의도적 정책 선택(원격제어·프롬프트 회피 등
+# bypassPermissions 경고 제거(0.8.3): 이건 dead-config가 아니라 신뢰 환경에서의 의도적 정책 선택(원격제어·프롬프트 회피 등
 # 정당한 유스케이스). 매 세션 제거-권장으로 사용자의 문서화된 선호를 반박하던 과잉 넛지를 삭제 — 이 훅은 깨진/죽은 설정만 본다.
 models = []
 for v in (env.get("ANTHROPIC_MODEL", ""), env.get("ANTHROPIC_SMALL_FAST_MODEL", ""), d.get("model", "")):
@@ -39,7 +39,7 @@ for v in (env.get("ANTHROPIC_MODEL", ""), env.get("ANTHROPIC_SMALL_FAST_MODEL", 
 if models:
     issues.append("로컬 모델 매핑 잔존: %s" % ", ".join(models))
 if issues:
-    print("⚠ 死config 경고 — 이 프로젝트 `.claude/settings.json`:\n- " + "\n- ".join(issues)
+    print("⚠ dead-config 경고 — 이 프로젝트 `.claude/settings.json`:\n- " + "\n- ".join(issues)
           + "\n(전역 doctrine: 로컬 LLM은 하네스 용도로 쓰지 않는다. 이 설정은 세션을 깨거나 권한을 우회시킬 수 있음 — 제거를 권장.)")
 ' 2>/dev/null)"
 

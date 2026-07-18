@@ -20,7 +20,7 @@ export const meta = {
 // units: [{key, prompt, model?}]  필수 — 단위별 분석 지시(출력 지시는 불필요, 스키마가 강제).
 //   model은 unit별 analyzeModel override(alias만 — 풀 ID 금지), 미지정시 analyzeModel 사용.
 // context: 모든 에이전트 프롬프트 앞에 붙는 공통 맥락(제품·페르소나·경로·design-side spec). 강력 권장.
-// analyzeModel='sonnet'  (alias만 — 풀 ID 금지)
+// analyzeModel='sonnet'  (alias만 — 풀 ID 금지) · analyzeEffort='high'(기본 — 세션 xhigh 상속 차단, P1' 2축 배치)
 // reviewerAgent='reviewer' (기본) — verify·critic을 reviewer 서브에이전트(opus·xhigh·read-only)로 라우팅: frontmatter가
 //   effort·read-only를 고정해 비-ultracode 세션에서도 xhigh로 검증. false면 model 기반(verifyModel/criticModel)으로 폴백.
 // verifyModel='opus' | criticModel='opus' — reviewerAgent=false일 때만 쓰는 폴백 모델.
@@ -194,8 +194,10 @@ while (pending.length && round < maxRounds) {
 
   // canonical no-barrier: 단위별로 분석이 끝나는 즉시 그 단위의 verify가 돈다.
   // batchSize로 동시 분석 단위 수를 제한(청크 사이는 barrier) — API rate-limit cascade 회피.
+  // effort:'high' 명시(0.9.0, P1' 2축 배치) — 미지정이면 ultracode 세션의 xhigh를 전 analyze 워커가 상속해
+  // fan-out 수만큼 사고 비용이 곱해진다. 정형 분석=high로 충분(verify/critic은 reviewer frontmatter가 xhigh 고정 — 그쪽은 안 아낀다).
   const analyzeStage = (u) =>
-    agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}`, phase: `Round ${round}`, schema: FINDINGS, model: u.model || analyzeModel })
+    agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}`, phase: `Round ${round}`, schema: FINDINGS, model: u.model || analyzeModel, effort: A.analyzeEffort || 'high' })
   const verifyStage = (r, u) => {
     // 주의: pipeline은 stage1(analyze)이 null이면 stage2를 아예 호출하지 않는다(런타임 실구현 확인)
     // — 이 분기는 방어용 dead path이고 실동작은 배치 루프의 `!r` prong이다. `!r` 가드를 지우면 회귀한다.

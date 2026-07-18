@@ -149,7 +149,8 @@ while (processed < maxGoals) {
 - **되돌리기 어렵거나 외부영향(push·배포·DB 마이그레이션 실행·비밀변경·외부전송·자금경로)이면 그 부분은 하지 말고 self_status='needs_human'으로 반환**(이 루프는 그런 걸 자동 실행하지 않는다).
 - 끝나면 \`${G} attempt --id ${qid(next.id)} --evidence "<검증한 실제 근거>"\`로 증거를 원장에 기록(이게 있어야 게이트가 돈다).
 - evidence_ref엔 reviewer가 재확인할 수 있는 구체 근거(file:line·테스트 출력)를 담아라 — 추측·자기선언 금지.`,
-    { label: `work:${next.id}`, phase: 'Run', model: 'sonnet', schema: WORK_SCHEMA })
+    { label: `work:${next.id}`, phase: 'Run', model: 'sonnet', effort: 'high', schema: WORK_SCHEMA })
+  // effort:'high' 명시(0.9.0) — 미지정이면 ultracode 세션의 xhigh를 상속해 구현 워커가 사고 비용을 과잉 지불(P1' 2축 배치).
 
   if (!work || work.self_status === 'needs_human') {
     skipped.push({ id: next.id, title: next.title, why: (work && work.block_reason) || 'worker가 needs_human 판정(되돌리기 어려움/판단 필요)' })
@@ -158,8 +159,11 @@ while (processed < maxGoals) {
     continue
   }
   if (work.self_status === 'blocked') {
-    await agent(`Bash로 실행: \`${G} block --id ${qid(next.id)} --reason ${shq((work.block_reason || 'dependency').slice(0, 120))}\``, { label: `block:${next.id}`, phase: 'Run', model: 'haiku' }).catch(() => {})
-    skipped.push({ id: next.id, title: next.title, why: 'blocked: ' + (work.block_reason || '') })
+    // 기록 실패를 묵살하지 않는다(0.9.0) — 원장은 in_progress인데 반환값은 blocked인 불일치를 가시화(durable state 원칙).
+    const blockOut = await agent(`Bash로 실행: \`${G} block --id ${qid(next.id)} --reason ${shq((work.block_reason || 'dependency').slice(0, 120))}\`\n출력을 그대로 반환.`, { label: `block:${next.id}`, phase: 'Run', model: 'haiku' }).catch((e) => `__block_record_error__: ${(e && e.message) || e}`)
+    const blockRecorded = !String(blockOut).includes('__block_record_error__')
+    if (!blockRecorded) log(`⚠ [${next.id}] block 원장 기록 실패 — 원장은 in_progress로 남음(반환값과 불일치). 수동 확인 필요.`)
+    skipped.push({ id: next.id, title: next.title, why: 'blocked: ' + (work.block_reason || '') + (blockRecorded ? '' : ' (⚠원장 기록 실패)') })
     continue
   }
 
@@ -173,10 +177,14 @@ worker가 댄 증거: ${work.evidence_ref}
 
 임무: 이 목표가 **실제로** 완료기준을 충족했는지 회의적으로 검증하라. worker의 self-report·증거 인용을 믿지 말고 **실제 파일을 다시 열어 확인**한다. criteria가 코드/테스트로 실증되면 pass, 미충족·환각·픽스처 우회면 refuted, 검증이 rate-limit 등으로 불완전하면 degraded. 기본자세는 의심.`,
     { label: `gate:${next.id}`, phase: 'Run', agentType: 'reviewer', schema: GATE_SCHEMA })
+    // reviewer 호출이 throw(rate-limit·context 오류)해도 워크플로를 abort하지 않고 degraded로 격리(0.9.0):
+    // 이전엔 무catch라 throw 시 gate --verdict degraded 기록 없이 전체 중단 → durable loop 회복성 파손.
+    .catch((e) => ({ verdict: 'degraded', reason: `reviewer 호출 실패: ${String((e && e.message) || e).slice(0, 120)}` }))
 
   const verdict = (gate && gate.verdict) || 'degraded'
-  // 게이트 결과를 원장에 기록(pass만 completed로 봉인 — 코드가 강제). reviewer 라벨은 실제 검증 tier.
-  const recordOut = await agent(`Bash로 아래를 그대로 실행하고 표준출력을 **가공 없이 그대로** 반환하라(성공 시 "completed" 문구·실패 시 에러 메시지):\n\`${G} gate --id ${qid(next.id)} --verdict ${verdict} --reviewer reviewer-opus --evidence-ref ${shq((work.evidence_ref || '').slice(0, 160))}\``,
+  // 게이트 결과를 원장에 기록(pass만 completed로 봉인 — 코드가 강제). --note에 reviewer 사유 포함(0.9.0):
+  // refuted/degraded 후 다음 세션이 "왜 실패했나"를 원장에서 복원할 수 있게(ledger.jsonl에 note가 남는다).
+  const recordOut = await agent(`Bash로 아래를 그대로 실행하고 표준출력을 **가공 없이 그대로** 반환하라(성공 시 "completed" 문구·실패 시 에러 메시지):\n\`${G} gate --id ${qid(next.id)} --verdict ${verdict} --reviewer reviewer-opus --evidence-ref ${shq((work.evidence_ref || '').slice(0, 160))} --note ${shq(((gate && gate.reason) || '').slice(0, 200))}\``,
     { label: `record:${next.id}`, phase: 'Run', model: 'haiku' }).catch((e) => `__record_error__: ${(e && e.message) || e}`)
 
   if (verdict === 'pass') {
@@ -204,6 +212,7 @@ worker가 댄 증거: ${work.evidence_ref}
 }
 
 const fin = await readStatus().catch(() => null)
+if (!fin) statusReadFailed = true // 최종 read 실패도 DEGRADED에 반영(0.9.0) — remaining='?'만 남기고 낙관 반환하지 않게
 const remaining = fin ? (fin.actionable || []).length : '?'
 if (processed >= maxGoals && remaining && remaining !== 0) {
   log(`⏸ 세션 예산(${maxGoals}) 도달 — 남은 actionable ${remaining}개는 다음 세션이 이어간다(원장이 SSOT, 마라톤 방지 suspend).`)

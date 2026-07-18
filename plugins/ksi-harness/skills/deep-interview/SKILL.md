@@ -1,7 +1,7 @@
 ---
 name: deep-interview
 description: 크거나 모호하거나 되돌리기 어려운 작업에 착수하기 전에, 의도와 스코프를 끝까지 캐물어 합의된 spec을 만든 뒤 진행한다. 요청이 두 갈래 이상으로 해석되거나 잘못 짚으면 비용이 큰 상황에서 쓴다.
-when_to_use: 새 기능·대형 리팩터·새 프로젝트 착수 전, 또는 요청 의도가 모호(WHAT·스코프)하다고 느껴질 때. 해법 접근(HOW)이 여럿이면 brainstorm 먼저(라우팅 SSOT=CLAUDE.md 착수 게이트).
+when_to_use: ① 해석이 갈리거나(WHAT·스코프 모호) ② 대표자의 제품 결정이 필요하거나 ③ 잘못 짚으면 재작업 비용이 클 때. 이미 명확한 새 기능은 이 스킬 대신 인라인 3~5줄 spec으로 바로 진행(라우팅 SSOT=CLAUDE.md 착수 게이트). 해법 접근(HOW)이 여럿이면 brainstorm 먼저.
 ---
 
 # Deep Interview — 착수 전 의도 확정

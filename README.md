@@ -73,7 +73,7 @@ flowchart TB
 | tier | 모델 | 역할 |
 |---|---|---|
 | `scout` | Haiku | 탐색·기계적 잡일(코드 파일 수정 금지) |
-| `worker` | Sonnet high | 명세를 따르는 구현·리팩터·테스트 |
+| `worker` | Sonnet high | 합의된 목표 안에서 구현을 소유(로컬 설계·테스트 전략 자율, 경계 변경만 상신) |
 | `reviewer` | Opus xhigh · **read-only** | 명세를 의심 — adversarial 반증·완성도 critic |
 | `main` | 세션 최상위 모델 | 오케스트레이션·되돌리기 어려운 최종 판단(움직이는 천장이라 에이전트 없음) |
 
@@ -117,10 +117,10 @@ Claude Code의 **생명주기 이벤트마다** 훅이 스스로 발화한다. �
 ```
 1. 세션 시작   → SessionStart 훅이 원장·프로젝트 두뇌 복원 · 死config·업데이트 점검. 독트린이 컨텍스트에 로드.
 2. 요청 도착   → gate-nudge가 신규 기능·대형 리팩터면 "스코프 먼저" 상기(모호·고위험이면 deep-interview로 승격).
-3. 작업        → 난이도에 맞는 tier로(잡일 scout · 구현 worker · 판단 main). 큰 감사는 audit-loop로 fan-out.
+3. 작업        → 기본은 메인이 직접(solo-first). 위임은 병렬성·context 격리·독립 검증의 실익이 분명할 때만(잡일 scout · 구현 worker · 판단 main).
 4. 편집마다     → PostToolUse가 lint·시크릿·의존성 취약점을 자동 점검. Bash는 PreToolUse가 되돌리기 불가한 것만 차단.
 5. 완료 직전   → Stop 훅이 "green ≠ 작동" 게이트: 미커밋 화면/상태전이 편집이 있으면 렌더·실제 흐름 검증 요구.
-6. 검증        → worker 산출물은 reviewer(Opus·read-only)가 adversarial 반증. goal은 증거 게이트 통과만 "완료" 봉인.
+6. 검증        → 산출물은 실제 근거로 재검증(self-report 불신). 크거나 위험 표면이면 reviewer(Opus·read-only)가 adversarial 반증. goal은 증거 게이트 통과만 "완료" 봉인.
 7. (자율 모드)  → goals-run이 원장 목표를 evidence-gate로만 소진, red-lane(배포·자금·비밀)은 사람에게 넘김.
 ```
 

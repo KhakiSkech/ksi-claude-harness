@@ -9,7 +9,7 @@ when_to_use: substantive한 코드 감사·병렬 분석이 필요할 때 — �
 ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한다. 핵심 두 원칙:
 **적재적소 티어링**(탐색=haiku · 분석/구현=sonnet · verify=opus · 모순 tiebreak/고위험 최종=메인급)과 **adversarial 검증**(값싼 워커는 그럴듯한 거짓을 만든다 — 반드시 반증으로 거른다. 이 하네스에서 반복 적발됨).
 
-## 0. 스코프 dial (먼저 — ultracode는 비제약이 기본이라 의도적으로 줄인다)
+## 0. 스코프 dial (먼저 — 적정규모가 기본: 최소 실행에서 시작해, 필요가 정당화할 때만 dial-up)
 - 작은 substantive: 워커 1개 + 검증 1패스.
 - 중간: 모듈 N개 = 워커 N개, adversarial 1패스.
 - 큰 감사: fan-out + adversarial(새 finding 마를 때까지, maxRounds dial로 라운드 상한 — 기본값 SSOT=audit-loop.js LOOP CONTRACT, 여기 수치는 편의 표기) + 완성도 critic. **확장 옵션:** critic이 미탐색 단위를 반환하면 상한 내에서 다음 라운드 analyze fan-out으로 자동 편입(§5 재투입 루프) — 고정 분해로 안 본 표면이 남을 때.
@@ -33,9 +33,9 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 - **제품 정체성 SSOT 정합** — README·CLAUDE.md 도메인 불변식/제품명과 모순되는 표면(피벗·리네이밍 후 구 브랜드·렌더러·분류 잔재 누수).
 - **어뷰징·무결성 불변식** *(맥락추론 — `model:'opus'` 라우팅)* — 먼저 프로젝트 CLAUDE.md의 `## 도메인 불변식` 섹션(스캐폴딩: `~/.claude/templates/domain-invariants.example.md`)을 로드해 구체값을 측정 기준으로 — 없으면 README/docs에서 추출하거나 사용자 1줄 확인. 형제 모듈 대조는 보조. 보안(auth/IDOR/injection)과 **분리**: '인증상 허용되나 비즈니스룰상 금지'. **4 어뷰징클래스(역할겸직·경제무결성·게이밍·시간축권한)·음성 케이스(self/cross/replay/state-change-after) = CLAUDE.md 'green≠금지' SSOT 참조.** happy-path가 green이어도 음성 케이스 안 태우면 이 클래스는 영원히 green.
 - **운영조건/fault-injection** *(맥락추론 — `model:'opus'` 라우팅)* — 정적 코드가 아니라 런타임 실패 모드: 외부의존(거래소·결제·소켓·큐)·상태기계면 타임아웃·부분체결·에러코드·rate-limit·재연결·동시성에서 어떻게 깨지나. **스테이징/testnet이 구조적으로 못 보는 환경분기가 있으면 'done'이 아니라 '실환경 카나리 전 unknown'으로 표기.**
-- workflow: `agent(prompt, {model: 'sonnet', schema})`
+- workflow: `agent(prompt, {model: 'sonnet', effort: 'high', schema})` — **effort 명시(P1' 2축 배치)**: 미지정이면 세션 effort(ultracode=xhigh)를 상속해 fan-out 수만큼 사고 비용이 곱해진다. 정형 분석=high로 충분(런타임 `agent({effort})` 지원 실측 확인 2026-07-18).
 - 인터랙티브: Task로 `subagent_type: worker` spawn (worker.md가 Sonnet+effort 고정)
-- 어려운 추론이 필요한 단위만 `'opus'`로. **(2026-07-01 Sonnet 5)** ultracode에선 inline sonnet analyze도 이제 실제 xhigh를 상속 → analyze 기본 능력↑라 opus로 보낼 단위가 준다. 단 어뷰징·무결성/운영조건·fault-injection 렌즈의 opus 라우팅은 **유지 확정** — **paired-run 실측(2026-07-01, Pro-Bid 자금경로+권한): 경제무결성 슬라이스 material_gap**(sonnet-xhigh가 real high '환불 전면 불능'을 완전 누락, opus 환각 0건). 권한/역할 슬라이스는 minor_gap(top finding shared)이라 sonnet 근접이나 같은 렌즈에 묶여 분리 downgrade는 비효율. (n=2 스팟체크 — 방향은 '경제무결성=opus·순수역할=sonnet 근접', 추가 실측 시 재고 여지. 재검토 TTL: 분기 1회 paired-run 재실측.)
+- 어려운 추론이 필요한 단위만 `'opus'`로. (0.9.0: analyze 기본 effort=high 명시로 "xhigh 상속" 구모델 서술은 삭제 — opus 라우팅 판단 기준은 effort가 아니라 렌즈 난이도.) 어뷰징·무결성/운영조건·fault-injection 렌즈의 opus 라우팅은 **유지 확정** — **paired-run 실측(2026-07-01, Pro-Bid 자금경로+권한): 경제무결성 슬라이스 material_gap**(sonnet-xhigh가 real high '환불 전면 불능'을 완전 누락, opus 환각 0건). 권한/역할 슬라이스는 minor_gap(top finding shared)이라 sonnet 근접이나 같은 렌즈에 묶여 분리 downgrade는 비효율. (n=2 스팟체크 — 방향은 '경제무결성=opus·순수역할=sonnet 근접', 추가 실측 시 재고 여지. 재검토 TTL: 분기 1회 paired-run 재실측. 주의: 이 실측은 sonnet **xhigh** 기준 — analyze 기본이 high로 바뀐 지금은 gap이 줄지 않으므로 opus 라우팅 유지 결론은 그대로 유효.)
 
 ## 4. adversarial 검증 — opus tier (생략 금지)
 각 critical/high finding(기본 — dial로 medium 이하 확장)을 **다른 에이전트가 반증 시도** — 실제 파일/근거를 다시 열어 거짓양성·과장·지어낸 명령/경로를 거른다. 살아남은 것만 채택. 확실치 않으면 보수적으로 의심. (§0.5 verify 트리거와 동일 기준 — 절마다 다르게 읽히면 안 된다.)

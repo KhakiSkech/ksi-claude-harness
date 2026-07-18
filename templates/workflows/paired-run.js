@@ -1,7 +1,7 @@
 export const meta = {
   name: 'paired-run',
   description: '재사용 tier-검증 골격 — 같은 unit을 challenger(기본 sonnet)·reference(기본 opus) 두 tier로 동일 프롬프트 분석 → reviewer가 gap을 diff하되 reference-only finding을 코드로 재검증(환각 크레딧 차단)해 진짜 recall gap만 집계. model 출시마다 "tier X가 렌즈 Z에서 tier Y를 대체하나"를 싸게 답한다.',
-  whenToUse: '새 model 출시·tier 배치 재검토 시. audit-loop(버그 발견)과 shape가 다른 tier-라우팅 검증 골격 — units(키+프롬프트)+context(렌즈 spec)만 넘긴다. 단일 파일 조회엔 오버킬. 비-ultracode 세션에선 analyze가 세션 effort를 상속해 reference(opus)가 xhigh 미만으로 돌 수 있음 — ultracode 세션 권장.',
+  whenToUse: '새 model 출시·tier 배치 재검토 시. audit-loop(버그 발견)과 shape가 다른 tier-라우팅 검증 골격 — units(키+프롬프트)+context(렌즈 spec)만 넘긴다. 단일 파일 조회엔 오버킬. 0.9.0: 양쪽 analyze에 동일 effort를 명시(pairEffort, 기본 xhigh)해 세션 모드와 무관하게 통제 비교가 성립 — 비-ultracode 세션 제약 해소.',
   phases: [
     { title: 'PairedAnalyze', detail: 'same unit을 challenger·reference가 동일 프롬프트로(통제 비교)' },
     { title: 'GapDiff', detail: 'reviewer가 두 set diff + reference-only 실재 재검증(환각 제외)' },
@@ -15,7 +15,7 @@ export const meta = {
 //  aggregate     = 최악 unit verdict. material 하나라도면 그 렌즈는 reference 유지가 정답.
 //  통제(핵심)     = challenger/reference는 **model만** 다르고 프롬프트·context·schema는 동일. 이게 깨지면 비교가 아니라 잡음이다.
 //  model ID 예외  = 기본은 alias만(challengerModel/referenceModel, 풀 ID 금지). version-pin이 필요한 신구버전 A/B 비교(예: 특정 모델 스냅샷 간 비교)는 예외적으로 풀 모델 ID 허용.
-//  effort        = analyze는 inline agent라 세션 effort를 상속(ultracode면 기본 sonnet/opus 쌍은 양쪽 다 xhigh = 동일 조건. 단 challenger가 xhigh 미지원 tier[haiku·pre-5 Sonnet]면 effort 통제가 깨짐). gap-diff는 reviewer(opus·xhigh·read-only, 부재 시 opus 폴백).
+//  effort        = 양쪽 analyze에 **동일 effort를 명시**(pairEffort dial, 기본 'xhigh') — 세션 effort 상속에 기대지 않아 비-ultracode 세션에서도 통제가 성립(0.9.0, 런타임 agent({effort}) 지원 실측 확인). challenger가 xhigh 미지원 tier(haiku·pre-5 Sonnet)면 pairEffort:'high'로 낮춰 통제 유지. gap-diff는 reviewer(opus·xhigh·read-only, 부재 시 opus 폴백).
 //  왜 reviewer로 diff = producer(challenger/reference)와 다른 skeptic이 있어야 reference 환각·과장을 걸러 gap을 정직하게 잰다(cross-model error-decorrelation). challenger로 diff하면 correlated blind spot.
 //  한계          = 스팟체크지 벤치마크 아님(n=units·1회). verdict는 방향 신호 — caveat을 결과에 동봉해 과신을 막는다.
 // ====
@@ -25,6 +25,7 @@ export const meta = {
 // context: 공통 맥락(제품·렌즈 spec·규율). 모든 프롬프트 앞에 붙음 — 통제의 핵심이라 강력 권장.
 // challengerModel='sonnet'      싼 후보 tier(alias만 — 풀 ID 금지)
 // referenceModel='opus'         기준 tier(alias만)
+// pairEffort='xhigh'            양쪽 analyze 공통 effort(통제 — challenger가 xhigh 미지원 tier면 'high'로)
 // lens='(미지정)'                렌즈 이름(라벨·프롬프트용, 예: '경제무결성·fault-injection')
 // gapAgent='reviewer'           gap-diff를 reviewer 서브에이전트(opus·xhigh·read-only)로 라우팅. false면 model 기반(gapModel).
 // gapModel='opus'               reviewer 부재/미해석 시 폴백 모델.
@@ -37,6 +38,8 @@ if (!units.length) return { error: 'args.units가 비어 있음 — [{key, promp
 const CTX = A.context || ''
 const challengerModel = A.challengerModel || 'sonnet'
 const referenceModel = A.referenceModel || 'opus'
+// 통제의 일부(0.9.0): 양쪽 동일 effort 명시 — 세션 모드 무관. challenger가 xhigh 미지원이면 'high'로 낮춰 호출.
+const pairEffort = A.pairEffort || 'xhigh'
 const lens = A.lens || '(미지정 렌즈)'
 const gapAgent = A.gapAgent === undefined ? 'reviewer' : A.gapAgent
 const gapModel = A.gapModel || 'opus'
@@ -119,8 +122,8 @@ const perUnit = (
     units,
     async (u) => {
       const [c, r] = await parallel([
-        () => agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}:challenger(${challengerModel})`, phase: 'PairedAnalyze', model: challengerModel, schema: FIND }),
-        () => agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}:reference(${referenceModel})`, phase: 'PairedAnalyze', model: referenceModel, schema: FIND }),
+        () => agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}:challenger(${challengerModel})`, phase: 'PairedAnalyze', model: challengerModel, effort: pairEffort, schema: FIND }),
+        () => agent(`${CTX}\n${u.prompt}`, { label: `analyze:${u.key}:reference(${referenceModel})`, phase: 'PairedAnalyze', model: referenceModel, effort: pairEffort, schema: FIND }),
       ])
       return { key: u.key, challenger: c, reference: r }
     },

@@ -1,7 +1,7 @@
 ---
 name: ui-audit
 description: UI를 코드가 아니라 렌더링된 픽셀로 검증한다. 앱을 띄워 핵심 페이지를 여러 뷰포트(desktop·mobile 390px)로 캡처하고, 스크린샷을 다중 에이전트가 눈으로 감사한 뒤 adversarial하게 검증해 우선순위 findings를 낸다. "타입·e2e는 통과하는데 화면이 깨진다"는 클래스의 결함을 잡는다.
-when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 보고할 때, 프론트 대량 fan-out 작업 후, 또는 주기적 시각 회귀 점검. 백엔드 검증(ruff/pytest)의 프론트 대응물.
+when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 보고할 때, 프론트 대량 fan-out 작업 후, 또는 주기적 시각 회귀 점검. 백엔드 검증(ruff/pytest)의 프론트 대응물. **단, 1~2줄 스타일·단일 컴포넌트 변경엔 이 스킬(전량 fan-out) 금지** — CLAUDE.md 작업방식의 렌더 확인(desktop+mobile 스크린샷 1회)으로 충분(codebase-audit §0 하한과 대칭).
 ---
 
 # UI Audit — 픽셀을 본다

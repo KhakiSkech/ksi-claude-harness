@@ -103,7 +103,9 @@ ucver() { printf '{"name":"ksi-harness","version":"%s"}\n' "$1" > "$T/ucroot/.cl
 ucrun() { rm -f "$UCSENT"; CLAUDE_PLUGIN_ROOT="$T/ucroot" bash "$HOOKS/update-check.sh" 2>/dev/null; }
 if [ -f "$T/ucroot/.claude-plugin/plugin.json" ]; then
   # 주의: json.dumps가 한글을 \uXXXX로 이스케이프하므로 raw 한글이 아니라 ASCII 키(systemMessage)로 매칭한다.
-  ucver 0.1.0; case "$(ucrun)" in *systemMessage*) pass "update-check.sh — 뒤처짐 → 알림" ;; *) failt "update-check.sh — 뒤처짐인데 침묵" ;; esac
+  # 신선 clone 직후 첫 ls-remote가 Windows에서 4s timeout을 드물게 초과(타이밍 flake, 2026-07-18 실측) — 1회 재시도
+  ucver 0.1.0; ucout="$(ucrun)"; case "$ucout" in *systemMessage*) ;; *) ucout="$(ucrun)" ;; esac
+  case "$ucout" in *systemMessage*) pass "update-check.sh — 뒤처짐 → 알림" ;; *) failt "update-check.sh — 뒤처짐인데 침묵" ;; esac
   ucver 0.2.0; out="$(ucrun)"; [ -z "$out" ] && pass "update-check.sh — 동일 → silent" || failt "update-check.sh — 동일인데 발화"
   ucver "shaXYZ"; out="$(ucrun)"; [ -z "$out" ] && pass "update-check.sh — 비-semver → silent" || failt "update-check.sh — 비-semver인데 발화"
   git -C "$T/ucroot" remote set-url origin /nonexistent.git 2>/dev/null; ucver 0.1.0

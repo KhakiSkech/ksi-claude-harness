@@ -18,6 +18,7 @@ import argparse
 import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -197,11 +198,32 @@ def cmd_report(args):
           "(발화수·exit-code·토큰·마라톤·verdict-mix)만 낸다. cull 결정은 이 robust 신호로.")
 
 
+def _bash_path() -> str:
+    # Windows에서 unqualified "bash"는 CreateProcess 탐색 순서(System32가 PATH보다 우선) 때문에
+    # WSL 스텁(System32\bash.exe)에 가로채여 execvpe(/bin/bash) 실패로 죽는다(2026-07-18 selfcheck 실측).
+    # PATH 기준(shutil.which)으로 절대경로를 박고, 그 결과마저 System32면 git-bash 관용 위치로 우회.
+    cand = shutil.which("bash")
+    if os.name == "nt":
+        sys32 = os.path.normcase(os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32"))
+        cdir = os.path.normcase(os.path.dirname(cand)) if cand else ""
+        # WindowsApps app-execution-alias(bash.exe)도 Store-WSL 스텁 — System32와 동급으로 의심.
+        if not cand or cdir == sys32 or cdir.endswith(os.path.normcase(r"Microsoft\WindowsApps")):
+            for p in (r"C:\Program Files\Git\usr\bin\bash.exe", r"C:\Program Files\Git\bin\bash.exe",
+                      r"C:\Program Files (x86)\Git\usr\bin\bash.exe",
+                      os.path.expandvars(r"%LOCALAPPDATA%\Programs\Git\usr\bin\bash.exe")):
+                if os.path.exists(p):
+                    return p
+    return cand or "bash"
+
+
+BASH = _bash_path()
+
+
 def _run_hook(path: str, stdin_obj: dict, timeout=10):
     """훅을 stdin JSON으로 실행하고 (rc, out, err) 반환. read-only 벤인 입력만."""
     try:
         p = subprocess.run(
-            ["bash", path],
+            [BASH, path],
             input=json.dumps(stdin_obj),
             capture_output=True, text=True, timeout=timeout,
         )

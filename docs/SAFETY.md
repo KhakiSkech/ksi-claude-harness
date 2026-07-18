@@ -5,7 +5,7 @@
 ## 원작자 기본 구성 (권장값)
 - `~/.bashrc` alias로 `claude` 실행 시 **`--dangerously-skip-permissions`(권한 프롬프트 전부 끔) + ultracode(xhigh+workflow 자동)** 상시 ON.
 - `settings.json`에 `skipDangerousModePermissionPrompt` + `skipAutoPermissionPrompt`.
-- **permission deny-list 없음**(backstop 0). 유일한 안전망 = 모델의 자기절제 + doctrine의 자율성 게이트(되돌리기 어려운 작업·외부전송은 먼저 확인).
+- **permission deny-list 없음**(backstop 0). 유일한 안전망 = 모델의 자기절제 + doctrine의 의사결정 3레인(되돌리기 어려운 실행·외부전송은 대표자 결정 레인 — 먼저 확인).
 
 ## 왜 이렇게 쓰나 (맥락)
 - 개인 **개발 전용 머신**에서, 끝까지 자율 실행을 강하게 선호하는 1인 워크플로에 최적화됨.

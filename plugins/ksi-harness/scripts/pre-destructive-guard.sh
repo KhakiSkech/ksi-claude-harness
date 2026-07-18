@@ -148,7 +148,7 @@ def check_one(seg, depth):
         # -fu가 새던 갭(2026-07-18 자가감사 confirmed) 봉합: rm/clean과 동일하게 단일-대시 플래그를 문자단위로 전개.
         pshort = "".join(a.lstrip("-") for a in pargs if a.startswith("-") and not a.startswith("--"))
         if ("f" in pshort) or any(a == "--force" for a in pargs):
-            block("git push --force(-f·-fu 등 f 포함) — --force-with-lease를 단독으로 쓰거나 사용자가 직접 실행(자율성 게이트 ①)")
+            block("git push --force(-f·-fu 등 f 포함) — --force-with-lease를 단독으로 쓰거나 사용자가 직접 실행(대표자 결정 레인)")
 
     if prog == "git" and "reset" in args:
         rargs = args[args.index("reset"):]
@@ -163,7 +163,7 @@ def check_one(seg, depth):
 
     if prog in ("psql", "mysql", "mariadb") or (prog == "supabase" and "db" in args):
         if re.search(r"(?i)\bdrop\s+(database|schema)\b", seg):
-            block("인터랙티브 DROP DATABASE/SCHEMA — 마이그레이션 경로로만(자율성 게이트 ①)")
+            block("인터랙티브 DROP DATABASE/SCHEMA — 마이그레이션 경로로만(대표자 결정 레인)")
 
 check_segments(cmd)
 sys.exit(0)

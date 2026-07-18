@@ -2,9 +2,7 @@
 # SessionStart hook: 진입한 프로젝트에 .ksi/goals.json이 있으면 미완 goal을 1줄로 넛지.
 # 있을 때만 발화(opt-in 자동 — 원장 안 쓰는 프로젝트엔 무음). dead-config-guard와 동형.
 # 목적: 여러 프로젝트를 오갈 때 '어디까지 했나·뭐가 가짜완료로 재오픈됐나'를 진입 즉시 복원.
-# 2026-07-16 확장(자가감사: 원장 채택 2/13 — 내구성 갭): .ksi는 없는데 docs/에 감사/백로그류 md가
-#   있으면(=추적할 상태가 있는데 원장 미채택) '/goals init 권장' 1줄 넛지를 추가. 이걸로 '전체 분석해줘'를
-#   매번 재분석하는 마찰을 원장 채택으로 유도(발화는 여전히 조건부 — 아무 근거 없는 프로젝트엔 무음).
+# (0.8.4 slim: docs/에 PLAN/TODO/AUDIT md 있으면 /goals init 권장하던 경로 B 제거 — 흔한 파일명 약신호 홍보라 저가치. 경로 A만 유지.)
 set -uo pipefail
 . "$(dirname "$0")/ksi-mode.sh" 2>/dev/null || KSI_MODE=strict
 [ "${KSI_MODE:-strict}" = off ] && exit 0   # escape: off면 넛지 침묵(0.8.3)
@@ -45,37 +43,7 @@ print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","addition
   exit 0
 fi
 
-# 경로 B: 원장 없음 + docs/에 감사·로드맵·백로그류 md 존재 → 원장 채택 넛지(세션당 1회).
-# 추적할 상태가 문서로 흩어져 있는데 durable ledger가 없다는 신호 — 무근거 프로젝트엔 발화 안 함.
-CWD="$cwd" python3 -c '
-import os, glob, json, hashlib, sys, tempfile
-cwd = os.environ.get("CWD","")
-if not cwd or not os.path.isdir(os.path.join(cwd, "docs")):
-    sys.exit(0)
-pats = ["*AUDIT*", "*ROADMAP*", "*BACKLOG*", "*REMAINING*", "*IMPROVEMENT*", "*PLAN*", "*TODO*"]
-hits = []
-for p in pats:
-    hits += glob.glob(os.path.join(cwd, "docs", p + ".md"))
-    hits += glob.glob(os.path.join(cwd, "docs", "**", p + ".md"), recursive=True)
-hits = sorted(set(hits))
-if not hits:
-    sys.exit(0)
-# 세션당 1회 dedup — 프로젝트 경로 해시로 키(같은 프로젝트 재진입 시 반복 억제).
-# Windows 이식성(2026-07-18): os.getuid() POSIX 전용·/tmp→C:\tmp 오해석 → gettempdir()+getuid 폴백(POSIX 불변).
-key = hashlib.sha1(cwd.encode()).hexdigest()[:8]
-sent = os.path.join(tempfile.gettempdir(), f"claude-{getattr(os, 'getuid', lambda: 0)()}", f"goalnudge-{key}")
-try:
-    os.makedirs(os.path.dirname(sent), exist_ok=True)
-    if os.path.exists(sent):
-        sys.exit(0)
-    open(sent, "w").close()
-except Exception:
-    pass
-n = len(hits)
-sample = ", ".join(os.path.basename(h) for h in hits[:3])
-msg = (f"이 프로젝트는 docs/에 상태 추적 문서 {n}개({sample}…)가 있는데 durable goal 원장(.ksi/)이 없습니다. "
-       "상태를 매번 재분석하는 대신 `/goals init`으로 원장화하면 세션을 넘어 남은 작업·가짜완료가 복원됩니다 "
-       "(완료=reviewer 증거 게이트). 감사/로드맵을 읽고 버리지 말고 gate 대상 goal로 durable화 권장.")
-print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":msg}}, ensure_ascii=False))
-' 2>/dev/null
+# 경로 B(docs/에 PLAN/TODO/AUDIT md 있으면 /goals init 권장) 제거(0.8.4 slim): 흔한 파일명(PLAN·TODO)에 걸려
+# 약한 신호로 하네스 자체기능을 홍보하던 넛지 — 저가치 대비 매 세션 마찰이라 삭제. 원장 채택은 사용자가 필요 시 /goals로.
+# 경로 A(.ksi 원장 실존 시 미완 goal·프로젝트 두뇌 복원)만 남긴다 — 그건 opt-in(원장 쓰는 프로젝트)이라 정당.
 exit 0

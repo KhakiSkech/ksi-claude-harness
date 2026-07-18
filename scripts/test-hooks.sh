@@ -204,6 +204,18 @@ mkdir -p "$T/dcg-bypass/.claude"
 printf '{"permissions":{"defaultMode":"bypassPermissions"}}' > "$T/dcg-bypass/.claude/settings.json"
 out="$(dcg "$TW/dcg-bypass")"; [ -z "$out" ] && pass "dead-config — bypassPermissions 단독 → silent(사용자 선호 존중)" || failt "dead-config — bypass 단독인데 발화"
 
+echo "== gate-nudge slim(0.8.4): 한정어 없는 소작업 미발화 =="
+gn() { printf '{"prompt":"%s","session_id":"%s"}' "$1" "$2" | bash "$HOOKS/gate-nudge.sh"; }
+out="$(gn "정렬 기능 추가해줘" "gn1-$$")"; [ -z "$out" ] && pass "gate-nudge — 정렬 기능 추가(소작업) → 미발화(slim)" || failt "gate-nudge — 소작업 오발"
+out="$(gn "로깅 기능 넣어줘" "gn2-$$")"; [ -z "$out" ] && pass "gate-nudge — 로깅 기능 넣어줘 → 미발화" || failt "gate-nudge — 소작업 오발2"
+case "$(gn "새 기능 만들어줘 대시보드 화면" "gn3-$$")" in *additionalContext*) pass "gate-nudge — 새 기능 만들어줘 → 여전히 발화" ;; *) failt "gate-nudge — 진짜 kickoff 미발화(과협소)" ;; esac
+case "$(gn "대형 리팩터 하자" "gn4-$$")" in *additionalContext*) pass "gate-nudge — 대형 리팩터 → 여전히 발화" ;; *) failt "gate-nudge — 대형 리팩터 미발화" ;; esac
+
+echo "== goal-status slim(0.8.4): Path B(docs 넛지) 제거 확인 =="
+gsb() { printf '{"cwd":"%s"}' "$1" | CLAUDE_PLUGIN_ROOT="$PR" bash "$HOOKS/goal-status.sh"; }
+mkdir -p "$T/gsb/docs"; printf '# roadmap\n' > "$T/gsb/docs/ROADMAP.md"; printf '# todo\n' > "$T/gsb/docs/TODO.md"
+out="$(gsb "$TW/gsb")"; [ -z "$out" ] && pass "goal-status — docs/에 ROADMAP·TODO 있어도 .ksi 없으면 silent(Path B 제거)" || failt "goal-status — Path B 여전히 발화"
+
 echo
 [ $fail -eq 0 ] && echo "✅ 전체 통과" || echo "❌ 실패 있음"
 exit $fail

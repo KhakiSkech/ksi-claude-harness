@@ -211,7 +211,7 @@ function claude-plain { claude.exe @args }
 <details>
 <summary><b>업데이트 · 멀티머신 동기화 · 회귀 테스트</b></summary>
 
-**업데이트 알림**: 세션 시작 시 원격 최신 릴리스 태그와 설치 버전을 비교해 뒤처지면 한 줄 알림(하루 1회·오프라인이면 침묵). 적용은 사용자가 직접: `/plugin marketplace update ksi-tools` → `/plugin update ksi-harness`. 자동 적용은 공급망 위험 때문에 **의도적으로 안 합니다**. 릴리스 때는 반드시 태그를 푸시하세요: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+**업데이트 알림**: 세션 시작 시 원격 최신 릴리스 태그와 설치 버전을 비교해 뒤처지면 한 줄 알림(하루 1회·오프라인이면 침묵). 적용은 사용자가 직접: `/plugin marketplace update ksi-tools` → `/plugin update ksi-harness`. 자동 적용은 공급망 위험 때문에 **의도적으로 안 합니다**. 릴리스 때는 반드시 태그를 푸시하세요: `git tag vX.Y.Z && git push origin vX.Y.Z`. **(0.9.4 native 지원)** `~/.claude`를 직접 운용하는 native 머신은 `KSI_HARNESS_REPO`(repo checkout 경로) 환경변수를 설정하면 같은 훅이 native 모드로 동작 — 뒤처지면 `/plugin update` 대신 `sync-machine.sh --native`를 안내합니다(미설정 시 조용히 skip이라 개인 경로를 dist에 박지 않음).
 
 **멀티머신 동기화** (repo clone에서 한 줄 — repo 최신화 + 플러그인 갱신 + 훅 회귀까지):
 ```bash

@@ -144,7 +144,7 @@ PR="$(dirname "$HOOKS")"   # plugin root → CLAUDE_PLUGIN_ROOT (scripts/ksi-goa
 gs() { printf '{"cwd":"%s"}' "$1" | CLAUDE_PLUGIN_ROOT="$PR" bash "$HOOKS/goal-status.sh"; }
 mkdir -p "$T/gs-none"
 out="$(gs "$TW/gs-none")"; [ -z "$out" ] && pass "goal-status.sh — .ksi 없음 → silent" || failt "goal-status.sh — 원장없는데 발화"
-KG="$HOOKS/ksi-goals.py"
+KG="$PR/scripts/ksi-goals.py"   # 플러그인=plugins/ksi-harness/scripts·native=~/.claude/scripts 둘 다 정확(이전 $HOOKS 가정은 native에서 false-fail)
 python3 "$KG" --dir "$TW/gs-ok" init --project demo >/dev/null 2>&1
 python3 "$KG" --dir "$TW/gs-ok" register --id G1 --title work >/dev/null 2>&1
 python3 "$KG" --dir "$TW/gs-ok" start --id G1 >/dev/null 2>&1
@@ -188,7 +188,7 @@ print("1" if DEP.search(sys.argv[1]) else "0")
 [ "$(detect 'name = mypackage')" = "0" ] && pass "sca dep-detect — 비버전 편집 → skip" || failt "sca — 비버전 오탐"
 
 echo "== secret-scan CREATE TABLE NOT NULL 오표기 교정(0.8.3) =="
-rm -f "${TMPDIR:-/tmp}/claude-secret-scan.last" "$TEMP/claude-secret-scan.last" 2>/dev/null
+rm -f "${TMPDIR:-/tmp}/claude-secret-scan.last" "${TEMP:-/tmp}/claude-secret-scan.last" 2>/dev/null   # ${TEMP:-} — set -u에서 TEMP 미설정(비-Windows) 시 unbound 방지
 mkdir -p "$T/mig/migrations"
 printf 'CREATE TABLE users (id INT NOT NULL, name TEXT NOT NULL);\n' > "$T/mig/migrations/001c.sql"
 case "$(printf '{"tool_input":{"file_path":"%s"}}' "$TW/mig/migrations/001c.sql" | bash "$HOOKS/secret-scan.sh" 2>&1)" in

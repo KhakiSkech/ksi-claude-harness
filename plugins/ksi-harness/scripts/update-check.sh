@@ -1,17 +1,29 @@
 #!/usr/bin/env bash
-# SessionStart hook (플러그인): 원격 최신 릴리스 태그(vX.Y.Z)와 설치된 ksi-harness 버전을 비교해
+# SessionStart hook: 원격 최신 릴리스 태그(vX.Y.Z)와 설치된 ksi-harness 버전을 비교해
 # 뒤처졌으면 '업데이트 가능' 1줄을 사용자에게 알린다. **알림-only — 코드를 자동으로 바꾸지 않는다.**
 #   왜 자동적용 안 하나: 이 하네스는 dangerous mode(권한 프롬프트 off)로 돌 수 있어, 원격 코드를 검토 없이
-#   자동 실행하면 공급망 위험이다. 그래서 "새 버전 있다"만 알리고 적용은 사람이 /plugin update로 한다.
-# 설계(세션 시작을 느리게 하지 않는다): ① 하루 1회만 실제 네트워크 체크(throttle) ② git fetch는 짧은 timeout
-#   ③ 미설치 플러그인·git/python 부재·오프라인·태그 없음·비-semver 버전 등 어떤 실패도 graceful silent.
+#   자동 pull·실행하면 공급망 위험이다. 그래서 "새 버전 있다"만 알리고 적용은 사람이 한다.
+# 두 모드 자동 감지(0.9.4):
+#   · 플러그인 머신: ${CLAUDE_PLUGIN_ROOT} 설치본의 plugin.json version이 앵커 → 적용은 /plugin update.
+#   · native 머신(~/.claude 직접 운용): ${KSI_HARNESS_REPO}(repo checkout 경로)의 plugin.json version이 앵커
+#     → 적용은 sync-machine.sh --native. KSI_HARNESS_REPO 미설정 시 native는 조용히 skip(개인 경로를 dist에 박지 않는다).
 # 릴리스 신호 = git 태그 vX.Y.Z (release 시 `git tag vX.Y.Z && git push --tags`).
+# 설계(세션 시작을 느리게 하지 않는다): ① 하루 1회만 실제 네트워크 체크(throttle) ② git ls-remote 짧은 timeout
+#   ③ 미설치·경로부재·git/python 부재·오프라인·태그 없음·비-semver 전부 graceful silent.
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
+. "$(dirname "$0")/ksi-mode.sh" 2>/dev/null || KSI_MODE=strict
+[ "${KSI_MODE:-strict}" = off ] && exit 0   # escape: off면 업데이트 알림 침묵
 
-ROOT="${CLAUDE_PLUGIN_ROOT:-}"
-[ -n "$ROOT" ] || exit 0
-manifest="$ROOT/.claude-plugin/plugin.json"
+# 모드 감지: CLAUDE_PLUGIN_ROOT 있으면 플러그인, 아니면 KSI_HARNESS_REPO(native).
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -n "$PLUGIN_ROOT" ]; then
+  MODE=plugin; ANCHOR="$PLUGIN_ROOT"; manifest="$PLUGIN_ROOT/.claude-plugin/plugin.json"
+else
+  REPO="${KSI_HARNESS_REPO:-}"
+  [ -n "$REPO" ] || exit 0                 # native인데 repo checkout 경로 미지정 → skip
+  MODE=native; ANCHOR="$REPO"; manifest="$REPO/plugins/ksi-harness/.claude-plugin/plugin.json"
+fi
 [ -f "$manifest" ] || exit 0
 command -v git >/dev/null 2>&1 || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
@@ -31,8 +43,8 @@ installed="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get
 [ -n "$installed" ] || exit 0
 case "$installed" in *[!0-9.]*|''|.*|*.) exit 0 ;; esac
 
-# 원격 URL: 플러그인이 git 클론 안이면 그 origin, 아니면 알려진 repo(이 플러그인의 home).
-url="$(git -C "$ROOT" config --get remote.origin.url 2>/dev/null)"
+# 원격 URL: 앵커가 git 클론 안이면 그 origin, 아니면 알려진 repo(이 플러그인의 home).
+url="$(git -C "$ANCHOR" config --get remote.origin.url 2>/dev/null)"
 [ -n "$url" ] || url="https://github.com/KhakiSkech/ksi-claude-harness.git"
 
 # 최신 릴리스 태그 — 4s timeout, 실패(오프라인·auth·timeout)는 전부 silent.
@@ -52,7 +64,12 @@ except Exception:
 ' "$installed" "$latest" 2>/dev/null)"
 [ "$newer" = "1" ] || exit 0
 
-msg="ksi-harness v$latest 사용 가능 (설치됨 v$installed). 검토 후 업데이트: /plugin marketplace update → /plugin update ksi-harness  (자동적용 안 함 — 알림-only)"
+if [ "$MODE" = plugin ]; then
+  apply="검토 후 업데이트: /plugin marketplace update → /plugin update ksi-harness"
+else
+  apply="받기: cd \"$ANCHOR\" && bash scripts/sync-machine.sh --native"
+fi
+msg="ksi-harness v$latest 사용 가능 (설치됨 v$installed). $apply  (자동적용 안 함 — 알림-only)"
 MSG="$msg" python3 -c '
 import os, json
 m = os.environ["MSG"]
@@ -60,7 +77,7 @@ print(json.dumps({
     "systemMessage": m,
     "hookSpecificOutput": {
         "hookEventName": "SessionStart",
-        "additionalContext": "플러그인 업데이트 알림(사용자에게 전달): " + m,
+        "additionalContext": "업데이트 알림(사용자에게 전달): " + m,
     },
 }))
 ' 2>/dev/null

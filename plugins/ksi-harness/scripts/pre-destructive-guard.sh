@@ -83,6 +83,11 @@ def check_one(seg, depth):
     i = 0
     while i < len(toks):
         t = toks[i]
+        # bare 변수할당 프리픽스(NAME=val cmd) — 셸 표준 구문. env 래퍼는 처리하면서 이걸
+        # 누락하면 `FOO=bar rm -rf ~`로 하드가드가 우회된다(자가감사 CONFIRMED, 실측 exit0).
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t):
+            i += 1
+            continue
         if t in ("command", "nice", "nohup", "time", "xargs", "sudo"):
             i += 1
             continue
@@ -113,7 +118,9 @@ def check_one(seg, depth):
     toks = toks[i:]
     if not toks:
         return
-    prog = os.path.basename(toks[0].strip("'\""))
+    # 선행 백슬래시(\rm 등 alias 우회 관용구)도 제거 — 안 벗기면 `\rm -rf ~`·`\git push -f`가
+    # prog-name 하드블록 전체를 우회한다(자가감사 CONFIRMED, 실측 exit0).
+    prog = os.path.basename(toks[0].strip("'\"").lstrip("\\"))
     args = toks[1:]
 
     if prog == "rm":

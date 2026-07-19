@@ -82,6 +82,10 @@ def main():
         i = 0
         while i < len(toks):
             t = toks[i]
+            # bare 변수할당 프리픽스(NAME=val cmd) — pre-destructive-guard와 대칭 봉합.
+            if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t):
+                i += 1
+                continue
             if t in ("command", "nice", "nohup", "time", "xargs", "sudo"):
                 i += 1
                 continue
@@ -115,7 +119,8 @@ def main():
         rest = toks[i:]
         if not rest:
             return None, [], []
-        prog = os.path.basename(rest[0].strip("'\""))
+        # 선행 백슬래시(\git 등 alias 우회)도 제거 — pre-destructive-guard와 대칭 봉합.
+        prog = os.path.basename(rest[0].strip("'\"").lstrip("\\"))
         return prog, rest[1:], rest
 
     def check_data_exfil(seg_text, prog, args):

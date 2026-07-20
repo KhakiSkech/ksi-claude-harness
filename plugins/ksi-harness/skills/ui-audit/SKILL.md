@@ -46,7 +46,7 @@ when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 �
 
 5. **구조적 처방** — 여러 페이지에 반복되는 결함은 페이지별 땜질이 아니라 **공유 프리미티브로 한 번에**: `PageHeader` / `ResponsiveTable`(모바일 reflow) / `EmptyState` / 라벨 맵(SSOT). 일관성을 노력이 아니라 구조로 강제.
 
-6. **우선순위 findings + (선택) 회귀 baseline** — severity로 정렬해 보고. **무손실/DEGRADED(codebase-audit §6과 대칭): critical/high 시각 결함은 종합 요약이 묻지 못한다 · verify/critic이 부분 실패하면 audit-loop이 `degraded:true`를 반환 — 그 플래그가 서면 낙관 결론('시각적으로 멀쩡')을 보류한다(green≠작동의 UI판).** 수정 후 재캡처로 회귀 확인하고, 핵심 화면은 baseline 스크린샷을 저장해 다음 diff의 기준으로 남긴다.
+6. **우선순위 findings + (선택) 회귀 baseline** — severity로 정렬해 보고. **무손실/DEGRADED(codebase-audit §6과 대칭): critical/high 시각 결함은 종합 요약이 묻지 못한다 · verify/critic이 부분 실패하면 audit-loop이 `degraded:true`를 반환 — 그 플래그가 서면 낙관 결론('시각적으로 멀쩡')을 보류한다(green≠작동의 UI판).** 수정 후 재캡처로 회귀 확인하고, 핵심 화면은 baseline 스크린샷을 저장해 다음 diff의 기준으로 남긴다. **user-visible 변경이고 디자인 방향이 대표자 관심사였으면, baseline과 수정 후 스크린샷을 나란히 before→after Artifact 보드로 발행**(매체 SSOT=CLAUDE.md 작업방식 — **스크린샷은 base64 data URI로 실제 embed, 경로 텍스트만 적은 보드는 결함**) — baseline이 이미 저장돼 있어 한계비용 최저. 단 1~2줄 CSS·저위험 변경엔 render Read로 충분(전량 fan-out 금지선과 대칭). 무손실 규칙은 보드에서도 유지 — 보드가 critical/high 결함을 예쁘게 묻으면 안 된다.
 
 ## 원칙
 - **모바일을 빼지 않는다.** 결함의 대부분은 390px에서 처음 보인다.

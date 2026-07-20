@@ -49,6 +49,15 @@ echo
 echo "-- 정보 (역할에 따라)"
 chk 정보 gh      "repo publish/PR — 메인테이너만" "$PM gh  (cli.github.com)"
 echo
+echo "-- 워크플로 배치 (감사 스킬이 Workflow로 호출하는 saved workflow)"
+if [ -f "$HOME/.claude/workflows/audit-loop.js" ]; then
+  printf '  ✓ %-9s %s\n' workflows "~/.claude/workflows/ 배치됨 (감사 스킬이 canonical 경로로 호출)"
+else
+  printf '  ⚠ %-9s %s\n      → %s\n' workflows \
+    "~/.claude/workflows/ 미배치 — 감사 스킬이 인터랙티브 fallback으로 강등됨" \
+    "플러그인 머신: bash scripts/sync-machine.sh --plugin  (workflows/*.js·ksi-goals.py를 ~/.claude로 배치)"
+fi
+echo
 echo "-- 프로젝트별 (하네스 전역 아님 — 각 프로젝트 CLAUDE.md 완료 게이트 소관)"
 echo "  · mypy/pytest(Python) · tsc/typecheck(TS) — 프로젝트 가상환경/devDependencies로."
 echo "-- MCP: 하네스 하드 의존 없음 — playwright-mcp는 ui-audit 캡처의 '옵션' 대안일 뿐."

@@ -49,7 +49,7 @@ $G abandon --id G001 --reason "..."            # 되돌리기 명령 없음 — 
 ## `/goals run` — 자율 실행 (ultracode-native, evidence-gated)
 ultracode의 정수(자율·장기·workflow)를 goal-ledger 위에 얹는다. **종료를 모델 자기선언이 아니라 *원장 상태*에 묶는 것**이 핵심 — 안전레일은 ultracode 억압이 아니라 ultracode 자기 원칙(adversarial verify + 균형형 자율성)을 자율실행에 적용해 **가짜green 없이 굴러가게** 하는 바퀴다.
 
-**실물화: `~/.claude/workflows/goals-run.js`(saved workflow → 스킬 자동등록).** 산문 루프가 아니라 실행형 — `args: {dir(프로젝트 경로 필수), maxGoals(세션 예산, 기본 6·천장 20), context}`. RUN CONTRACT는 goals-run.js 상단 주석이 SSOT(여기서 재명세 안 함). 아래는 그 계약의 요지:
+**실물화: `~/.claude/workflows/goals-run.js`(native는 saved workflow로 자동등록 · 플러그인 머신은 `sync-machine.sh --plugin`이 `~/.claude/workflows/`에 배치 — 플러그인 번들은 workflows/를 안 나른다).** 산문 루프가 아니라 실행형 — `args: {dir(프로젝트 경로 필수), maxGoals(세션 예산, 기본 6·천장 20), context}`. RUN CONTRACT는 goals-run.js 상단 주석이 SSOT(여기서 재명세 안 함). 아래는 그 계약의 요지:
 1. `ksi-goals.py status --json`으로 다음 actionable(in_progress 우선) 선택. **actionable==0이면 종료** — 객관 원장 상태일 때만(모델 선언 아님).
 2. red-lane 하드스톱: 목표가 push·배포·DB마이그·자금경로(결제/환불/정산/실거래)·비밀·외부전송이면 **자동 실행 안 하고** needs_human으로 격리(worktree primitive 미검증이라 격리가 아니라 사람에게 넘김 — 의사결정 3레인의 대표자 결정 레인). 그 외 green-lane만 worker가 자동 구현.
 3. worker(sonnet) 구현 → `attempt --evidence` → **reviewer(opus xhigh read-only) evidence-gate** → pass만 completed. self-report 불신은 코드가 강제.

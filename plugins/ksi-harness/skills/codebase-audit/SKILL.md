@@ -18,7 +18,7 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 ## 0.5 재사용 루프 골격 (매번 0에서 재조립 금지 — 의미를 못박는다)
 `pipeline(units, analyze, verify)`는 **고정 깊이 단발**(analyze 1패스 + verify 1패스)이다. 완성도가 필요한 큰 감사는 §5의 critic→verify→재투입 루프를 얹어 수렴시킨다.
 **루프 의미론(트리거·survivor·정지·degraded·천장)의 SSOT = `~/.claude/workflows/audit-loop.js` 상단 LOOP CONTRACT 주석.** 여기서 재명세하지 않는다(산문↔코드 drift 차단) — 스킬은 dial만 넘긴다: `verifySeverities`·`maxRounds`·`analyzeModel`·`batchSize`(라운드 내 analyze fan-out을 N개씩 끊어 rate-limit cascade 예방 — §6 DEGRADED 경고와 연결)·`critic`(소규모 감사는 `false`로 생략)(기본값 SSOT=audit-loop.js LOOP CONTRACT — 여기 수치는 편의 표기).
-**canonical 경로 = audit-loop.js workflow.** `Workflow({scriptPath: '~/.claude/workflows/audit-loop.js', args: {units: [{key, prompt, model?}], context, maxRounds, verifySeverities, analyzeModel, batchSize, critic}})`로 호출. §3의 어뷰징·무결성/운영조건·fault-injection처럼 opus 라우팅이 필요한 렌즈는 해당 unit에 `model:'opus'`를 지정하는 것이 canonical 호출(미지정 unit은 `analyzeModel` 폴백). **§1–6은 그 워크플로가 내부 수행하는 spec이자, 워크플로 없이 인터랙티브로 돌릴 때의 fallback playbook**이다(파일 부재 시 LOOP CONTRACT대로 author).
+**canonical 경로 = audit-loop.js workflow.** `Workflow({scriptPath: '~/.claude/workflows/audit-loop.js', args: {units: [{key, prompt, model?}], context, maxRounds, verifySeverities, analyzeModel, batchSize, critic}})`로 호출. §3의 어뷰징·무결성/운영조건·fault-injection처럼 opus 라우팅이 필요한 렌즈는 해당 unit에 `model:'opus'`를 지정하는 것이 canonical 호출(미지정 unit은 `analyzeModel` 폴백). **§1–6은 그 워크플로가 내부 수행하는 spec이자, 워크플로 없이 인터랙티브로 돌릴 때의 fallback playbook**이다. **파일 부재 = 플러그인 머신에 workflow 미배치**(플러그인 번들은 workflows/를 자동설치 안 함 — `${CLAUDE_PLUGIN_ROOT}`도 스킬 prose에선 확장 안 됨) → `bash scripts/sync-machine.sh --plugin`으로 `~/.claude/workflows/`에 배치하거나, 그동안 LOOP CONTRACT대로 §1–6을 인터랙티브 author(조용한 강등이 아니라 명시적 fallback).
 
 ## 1. 분해
 대상을 독립 단위로 나눈다(모듈/레포/레이어/관심사). 각 단위 = 한 워커의 몫.

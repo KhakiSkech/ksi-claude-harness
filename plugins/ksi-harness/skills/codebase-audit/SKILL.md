@@ -31,6 +31,7 @@ ui-audit이 프론트 "픽셀"에 하는 일을 백엔드/일반 코드에 한�
 - 정확성/버그 · 보안 · 성능 · 일관성/중복 · 설정-의도 정합 · 문서-코드 drift
 - **핵심 여정 실행성** — 시드/픽스처가 파생·종단 상태를 직접 세팅해 실제 flow를 우회하는 '가짜 green' smell(`status=finalized` 주입·점수 직접 적재). 데모는 차 있는데 실사용 동선은 막혀 있나.
 - **제품 정체성 SSOT 정합** — README·CLAUDE.md 도메인 불변식/제품명과 모순되는 표면(피벗·리네이밍 후 구 브랜드·렌더러·분류 잔재 누수).
+- **제품 의도 복무(product-fit)** — 착수 spec·제품 의도 SSOT(프로젝트 CLAUDE.md·README) 대비 이 기능/메뉴가 어느 핵심 여정에 복무하는지, 고아·죽은 기능은 없는지. 기준 문서가 없으면 사용자 1줄 확인(기준 없는 감사는 '안 깨졌나'로 퇴화 — 완료를 게이트 통과가 아니라 의도 복무로 판정).
 - **어뷰징·무결성 불변식** *(맥락추론 — `model:'opus'` 라우팅)* — 먼저 프로젝트 CLAUDE.md의 `## 도메인 불변식` 섹션(스캐폴딩: `~/.claude/templates/domain-invariants.example.md`)을 로드해 구체값을 측정 기준으로 — 없으면 README/docs에서 추출하거나 사용자 1줄 확인. 형제 모듈 대조는 보조. 보안(auth/IDOR/injection)과 **분리**: '인증상 허용되나 비즈니스룰상 금지'. **4 어뷰징클래스(역할겸직·경제무결성·게이밍·시간축권한)·음성 케이스(self/cross/replay/state-change-after) = CLAUDE.md 'green≠금지' SSOT 참조.** happy-path가 green이어도 음성 케이스 안 태우면 이 클래스는 영원히 green.
 - **운영조건/fault-injection** *(맥락추론 — `model:'opus'` 라우팅)* — 정적 코드가 아니라 런타임 실패 모드: 외부의존(거래소·결제·소켓·큐)·상태기계면 타임아웃·부분체결·에러코드·rate-limit·재연결·동시성에서 어떻게 깨지나. **스테이징/testnet이 구조적으로 못 보는 환경분기가 있으면 'done'이 아니라 '실환경 카나리 전 unknown'으로 표기.**
 - workflow: `agent(prompt, {model: 'sonnet', effort: 'high', schema})` — **effort 명시(P1' 2축 배치)**: 미지정이면 세션 effort(ultracode=xhigh)를 상속해 fan-out 수만큼 사고 비용이 곱해진다. 정형 분석=high로 충분(런타임 `agent({effort})` 지원 실측 확인 2026-07-18).
@@ -57,7 +58,7 @@ severity로 정렬한 findings + 구체 권고. 반복 결함은 단위별 땜�
 - `.ksi/`가 없으면 → `/goals init` 후 위 두 upsert를 1줄 제안(원장 채택은 opt-in — 사용자 확인 후. 세션시작 자동 원장화 넛지[goal-status path B]는 저신호라 0.8.4에서 제거됨 — 이 제안이 유일한 채택 경로다). 자금경로·상태전이·멀티세션 프로젝트는 원장화가 기본값.
 - **AUDIT_<date>.md 신규 파일은 만들지 마라** — 그게 휘발·재분석의 근원. 굳이 prose 요약이 필요하면 기존 파일 갱신(신규 dated 파일 금지).
 - **fleet 전파(어뷰징 finding 한정):** '어뷰징·무결성' 렌즈가 confirmed 어뷰징 finding을 내면, 같은 클래스를 공유하는 형제 프로젝트에도 거의 항상 존재한다 — 그 음성 케이스를 형제의 `.ksi` 원장에 proposed goal로 register한다(전파 대상 맵·규율 SSOT = `~/.claude/templates/domain-invariants.example.md`의 'Fleet 전파' 절). verify 통과분만 전파(환각 확산 금지).
-- **제품 리스크 기록(fix 안 할 것·수용할 것):** 지금 고칠 게 아니라 **추적·수용** 대상인 보안/DB/어뷰징 finding은 goal이 아니라 risk로 — `ksi-goals.py --dir <proj> risk-add --id <R##> --title <finding> --lens <role/economic/gaming/time-axis/db/secret> --severity <..>`. 나중에 고치면 그 finding을 goal로 register(→goals-run 자율소진), 지금 안 고치기로 하면 `risk-accept --reason <근거>`(baseline — 근거 필수). goal의 completion 술어를 오염시키지 않게 risk는 분리 lifecycle(open→accepted/resolved→regressed). goal-status가 SessionStart에 미해소 risk를 복원.
+- **제품 리스크 기록(fix 안 할 것·수용할 것):** 지금 고칠 게 아니라 **추적·수용** 대상인 보안/DB/어뷰징 finding은 goal이 아니라 risk로 — `ksi-goals.py --dir <proj> risk-add`(정확한 플래그는 `ksi-goals.py --help`가 SSOT). 나중에 고치면 그 finding을 goal로 register(→goals-run 자율소진), 지금 안 고치기로 하면 `risk-accept`(baseline — 근거 필수). goal의 completion 술어를 오염시키지 않게 risk는 분리 lifecycle(open→accepted/resolved→regressed). goal-status가 SessionStart에 미해소 risk를 복원.
 
 ## 원칙
 - **티어링(3-tier 워커 + 메인급):** 탐색=Explore/scout(`'haiku'`) · 분석·구현=worker(`'sonnet'`) · verify·완성도 critic=**reviewer**(`'opus'`·xhigh·read-only) · 모순 tiebreak/고위험 최종=메인급(미지정 inherit, 의도적으로만) · 판정·종합=메인(Fable이든 Opus든 무관). 모델은 alias로 지정 — 풀 ID 하드코딩 금지.

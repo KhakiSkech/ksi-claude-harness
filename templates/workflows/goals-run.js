@@ -1,7 +1,7 @@
 export const meta = {
   name: 'goals-run',
   description: '자율 척추 — .ksi 원장의 actionable 목표를 evidence-gate로만 소진하는 실행형 루프. "모두 진행" 수동 반복을 구조적으로 없앤다. 종료는 모델 자기선언이 아니라 원장 상태(actionable==0). goals SKILL.md `/goals run`의 실물화(nextgen 1순위).',
-  whenToUse: '프로젝트에 .ksi 원장이 있고 여러 목표를 자율로 완결하고 싶을 때. args: {dir(프로젝트 경로 필수), maxGoals(세션당 상한, 기본 6 — 마라톤 방지 세션-경계 stitching), context(공통 맥락)}. red-lane(push·배포·마이그·자금경로·비밀)은 자동 실행 안 하고 멈춰 사람에게 넘긴다.',
+  whenToUse: '프로젝트에 .ksi 원장이 있고 여러 목표를 자율로 완결하고 싶을 때. args: {dir(프로젝트 경로 필수), maxGoals(세션당 상한, 기본 6 — 마라톤 방지 세션-경계 stitching), context(공통 맥락)}. red-lane(push·배포·마이그·자금경로·비밀) 차단은 goal 텍스트(제목·수용기준) 정규식 매칭 기반 — 매칭된 goal은 통째로 사람에게 넘긴다. 매칭을 통과한 goal의 구현 중 발생하는 red-lane 행위는 worker 프롬프트 지시 + pre-destructive-guard 훅에 의존한다(코드로 강제되지 않음).',
   phases: [
     { title: 'Run', detail: 'status→start→작업→attempt→reviewer gate 루프(원장 소진까지·세션예산까지)' },
   ],
@@ -11,9 +11,13 @@ export const meta = {
 //  종료 = 원장의 actionable==0(게이트통과/blocked/abandoned) OR 세션예산(maxGoals) 도달. 모델 자기선언 종료 금지.
 //  세션-경계 stitching = 마라톤 금지. maxGoals 도달하면 원장에 상태 flush돼 있으므로 깨끗이 suspend,
 //    다음 세션이 goal-status.sh brief로 복원해 이어감(원장이 SSOT). 단일 장기루프로 compaction 쌓지 않는다.
-//  red-lane 하드스톱 = 목표가 push/deploy/migration/자금경로/secret/외부전송이면 자동 실행 안 함 —
+//  red-lane 하드스톱 = goal의 title/criteria 자유텍스트가 RED 정규식에 매칭되면 그 goal 자체를 자동 실행 안 함 —
 //    needsHuman으로 격리하고 스킵(bypassPermissions 상시 + 되돌리기 게이트[자율성 ①]. worktree primitive는
 //    미검증이라 의존하지 않는다 — red는 격리가 아니라 '사람에게 넘김'으로 처리).
+//    주의(보장 범위): 이건 goal 텍스트 매칭이지 실행 감시가 아니다 — 매칭을 통과한 goal의 worker가 구현
+//    도중 red-lane 행위(push·배포·비밀변경 등)를 하는 것 자체를 이 정규식이 막지는 못한다. 그 경우의 방어선은
+//    worker 프롬프트의 "되돌리기 어려우면 needs_human으로 반환" 지시(아래 work agent 프롬프트) + pre-destructive-guard
+//    훅뿐 — 둘 다 코드로 강제되는 게이트가 아니라 지시/훅 의존이다.
 //  evidence-gate = reviewer가 criteria 대비 증거를 adversarial 검증. refuted면 gate 안 통과 → 그 목표는
 //    actionable로 남지만, 같은 목표 attempt N회 실패면 무한루프 방지로 skip(needsHuman).
 //  self-report 불신 = worker "완료" 선언이 아니라 reviewer 게이트통과만 completed. ksi-goals가 코드로 강제.
@@ -45,7 +49,9 @@ const STATUS_SCHEMA = {
     counts: { type: 'object', additionalProperties: true },
     actionable: {
       type: 'array', items: {
-        type: 'object', additionalProperties: false, required: ['id', 'title', 'status'],
+        // attempt는 required — 크로스세션 loop-guard(baselineAttemptById)의 durability가 이 필드에 걸려 있어
+        // structured-output round-trip에서 optional 드롭되면 조용히 세션-only로 강등된다(reviewer 반증 권고 반영).
+        type: 'object', additionalProperties: false, required: ['id', 'title', 'status', 'attempt'],
         properties: { id: { type: 'string' }, title: { type: 'string' }, status: { type: 'string' }, attempt: { type: 'integer' }, criteria: { type: 'array', items: { type: 'string' } }, evidence: { type: ['string', 'null'] } },
       },
     },
@@ -82,7 +88,8 @@ const readStatus = () =>
 const done = []
 const skipped = []       // red-lane·반복실패·blocked
 const recordFailures = [] // reviewer는 pass인데 원장이 completed로 봉인 안 됨(기록 실패) — 가짜완료 격리
-const attemptsById = {}
+const attemptsById = {}         // 세션 내 이 goal을 pick한 횟수(디스패치 시점 증가, 결과 무관) — 워크플로 호출마다 리셋되는 in-memory 카운터.
+const baselineAttemptById = {}  // repeat-failure 합산 게이팅용: 이 세션에서 goal을 처음 본 시점의 원장 attempt 스냅샷.
 let processed = 0
 let statusReadFailed = false  // 원장 상태 읽기 실패 — '완료'와 구분(가짜완료 방지)
 let carriedStatus = null      // 효율(0.8.3): pass 후 봉인재조회 결과를 다음 반복 top-read로 재사용(무변화 구간 중복 read 제거)
@@ -127,15 +134,27 @@ while (processed < maxGoals) {
     continue
   }
 
+  // repeat-failure skip — 세션 내 시도(attemptsById)만으로는 워크플로 호출마다(=새 세션마다) 카운터가 0으로
+  // 리셋돼, 여러 세션에 걸쳐 반복 실패한 goal이 매번 새 재시도 예산을 리필받는다(무한루프 방지가 세션 경계에서
+  // 무력화). next.attempt(ksi-goals가 gate --verdict refuted마다 +1, 신규 goal은 1부터 시작 — block/degraded/
+  // needs_human은 증가 안 시킴)는 원장에 영속돼 세션을 넘어 살아남으므로 이걸 세션 카운터와 합산한다.
+  // baselineAttemptById는 "이 세션에서 이 goal을 처음 본 시점"의 next.attempt를 얼어붙은 스냅샷으로 고정한다 —
+  // 그래야 이번 세션 중 발생한 refuted(=next.attempt가 실시간으로 올라감)를 attemptsById와 이중집계하지 않는다.
+  if (!(next.id in baselineAttemptById)) baselineAttemptById[next.id] = next.attempt || 1
+  const priorSessionFailures = Math.max(0, baselineAttemptById[next.id] - 1) // 이전 세션(들)에서 이미 소진된 시도 수(신규 goal=0)
   attemptsById[next.id] = (attemptsById[next.id] || 0) + 1
-  if (attemptsById[next.id] > maxAttemptsPerGoal) {
-    skipped.push({ id: next.id, title: next.title, why: `${maxAttemptsPerGoal}회 시도 후 게이트 미통과 — 무한루프 방지 skip, 사람 처리` })
-    log(`↷ 반복실패 스킵: [${next.id}] ${next.title}`)
+  const totalAttempts = priorSessionFailures + attemptsById[next.id]
+  if (totalAttempts > maxAttemptsPerGoal) {
+    skipped.push({
+      id: next.id, title: next.title,
+      why: `시도예산 소진(세션내 ${attemptsById[next.id]}회 + 이전세션누적 ${priorSessionFailures}회 = 총 ${totalAttempts}/${maxAttemptsPerGoal}) — 무한루프 방지 skip, 사람 처리`,
+    })
+    log(`↷ 반복실패 스킵(세션경계 합산): [${next.id}] ${next.title} — 세션내 ${attemptsById[next.id]} + 이전세션 ${priorSessionFailures} = ${totalAttempts}/${maxAttemptsPerGoal}`)
     continue
   }
 
   processed++
-  log(`▶ [${next.id}] ${next.title} (attempt ${attemptsById[next.id]}/${maxAttemptsPerGoal})`)
+  log(`▶ [${next.id}] ${next.title} (attempt 세션내 ${attemptsById[next.id]}·누적 ${totalAttempts}/${maxAttemptsPerGoal})`)
 
   // 작업 — worker tier(sonnet high). start → 실제 구현 → attempt --evidence.
   const work = await agent(`${CTX}

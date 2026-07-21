@@ -92,7 +92,7 @@ fi
 # 피로·스코프크립을 유발했다. 파일별 sentinel에 이번 출력 체크섬을 저장 — 직전과 동일한 위반
 # 세트면 재출력을 스킵. sentinel이 1시간(3600초) 이상 지났으면 강제로 다시 보여준다(완전 영구
 # 침묵 방지). date 실패 환경에서도 타이머가 무력화되지 않도록 위 config-error dedup과 동일 패턴.
-viol_dir="/tmp/claude-$(id -u)"
+viol_dir="${TMPDIR:-/tmp}/claude-$(id -u)"
 mkdir -p "$viol_dir" 2>/dev/null || true
 viol_key="$(printf '%s' "$file" | cksum | tr -d ' ' | cut -d' ' -f1)"
 viol_sentinel="${viol_dir}/claude-ruff-viol-${viol_key}.last"

@@ -47,13 +47,8 @@ $G abandon --id G001 --reason "..."            # 되돌리기 명령 없음 — 
 - 장기 자율 실행은 아래 **`/goals run`**(자율 실행) — 종료를 원장 상태(게이트통과)에 묶어 '모델 self-cancel로 종료'류 autopilot 패턴의 fail-open을 구조적으로 회피.
 
 ## `/goals run` — 자율 실행 (ultracode-native, evidence-gated)
-ultracode의 정수(자율·장기·workflow)를 goal-ledger 위에 얹는다. **종료를 모델 자기선언이 아니라 *원장 상태*에 묶는 것**이 핵심 — 안전레일은 ultracode 억압이 아니라 ultracode 자기 원칙(adversarial verify + 균형형 자율성)을 자율실행에 적용해 **가짜green 없이 굴러가게** 하는 바퀴다.
+ultracode의 자율·장기·workflow를 goal-ledger 위에 얹어, **종료를 모델 자기선언이 아니라 원장 상태에 묶는다.**
 
-**실물화: `~/.claude/workflows/goals-run.js`(native는 saved workflow로 자동등록 · 플러그인 머신은 `sync-machine.sh --plugin`이 `~/.claude/workflows/`에 배치 — 플러그인 번들은 workflows/를 안 나른다).** 산문 루프가 아니라 실행형 — `args: {dir(프로젝트 경로 필수), maxGoals(세션 예산, 기본 6·천장 20), context}`. RUN CONTRACT는 goals-run.js 상단 주석이 SSOT(여기서 재명세 안 함). 아래는 그 계약의 요지:
-1. `ksi-goals.py status --json`으로 다음 actionable(in_progress 우선) 선택. **actionable==0이면 종료** — 객관 원장 상태일 때만(모델 선언 아님).
-2. red-lane 하드스톱: 목표가 push·배포·DB마이그·자금경로(결제/환불/정산/실거래)·비밀·외부전송이면 **자동 실행 안 하고** needs_human으로 격리(worktree primitive 미검증이라 격리가 아니라 사람에게 넘김 — 의사결정 3레인의 대표자 결정 레인). 그 외 green-lane만 worker가 자동 구현.
-3. worker(sonnet) 구현 → `attempt --evidence` → **reviewer(opus xhigh read-only) evidence-gate** → pass만 completed. self-report 불신은 코드가 강제.
-4. 같은 목표 maxAttempts(2)회 미통과면 skip(무한루프 방지, 사람 처리).
-5. **세션-경계 stitching(마라톤 금지)**: maxGoals 도달하면 원장에 상태 flush돼 있으니 깨끗이 suspend → 다음 세션 goal-status.sh brief가 복원해 이어감(원장이 SSOT). 크론/`/loop` 안 씀(사용자 거절·미설치) — 재진입점은 사용자의 자연 세션 시작.
+**실물화: `~/.claude/workflows/goals-run.js`(native는 saved workflow로 자동등록 · 플러그인 머신은 `sync-machine.sh --plugin`이 `~/.claude/workflows/`에 배치 — 플러그인 번들은 workflows/를 안 나른다).** 산문 루프가 아니라 실행형 — `args: {dir(프로젝트 경로 필수), maxGoals(세션 예산, 기본 6·천장 20), context}`. **동작 계약(종료 조건·red-lane·evidence-gate·세션-경계 stitching)은 `~/.claude/workflows/goals-run.js` 상단 RUN CONTRACT 주석이 SSOT** — 여기서 재명세 안 함.
 
-**왜 안전한가 vs 'todo 카운터 0 + 모델 self-cancel'류 autopilot(:35 규율 전제 하에 — reviewer를 실제로 spawn하고 `--reviewer`에 진짜 검증 주체를 적는지는 스크립트가 강제 못 하고 이 스킬을 따르는 규율에 달렸다):** 그런 패턴은 todo 카운터 0 + 모델 self-cancel로 종료 → 가짜완료 후 멈추는 사고가 실제로 있었다(reviewer 검증 없이 완료 처리). 우리는 종료가 **reviewer-검증된 게이트통과**라는 원장 사실이라, 그 규율을 지키는 한 자율루프가 가짜완료로 빠져나갈 출구가 없다 — 구조적으로 100% fail-open 봉쇄는 아니고, 우회하면 `ungated_attempts` 경고와 다음 세션 `invalidate`가 잡아낸다. 자율성은 최대로, 검증은 강제로.
+**안전성 근거(:35 규율 전제 — reviewer를 실제로 spawn하는지는 스크립트가 강제 못 하고 이 스킬 준수에 달렸다):** 종료가 reviewer-검증된 게이트통과라는 원장 사실이라 'todo 0 + self-cancel'류 가짜완료 출구가 없다(완전봉쇄는 아니고, 우회하면 `ungated_attempts` 경고·다음 세션 `invalidate`가 잡는다). 자율성은 최대로, 검증은 강제로.

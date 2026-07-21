@@ -9,6 +9,8 @@
 #   완화 — force 없는 `rm -r ~`(홈 삭제)가 통과하던 구멍 봉합(표적 스코프는 여전히 복구불가급만이라 과차단 없음).
 #   (c) env/bash-c 래퍼 우회 봉합 — `env X=1 rm -rf ~`·`bash -c 'rm -rf ~'`가 prog=env/bash로 오판정되던 것.
 #   (d) git reset --hard·git clean -f 차단 추가(미커밋 변경/미추적 파일 소실 — push --force와 동급 위험).
+#   (e) DROP 가드를 SQL 파일 실행 경로까지 확장 — psql -f/--file·stdin 리다이렉트 파일 내용·heredoc body 검사
+#       (명령줄 문자열만 보던 사각 봉합). 읽기 불가 파일은 경고로 가시화. heredoc은 전역이 아니라 body만 검사.
 #   잔여 리스크(폐쇄 불가, 정직히 명시): heredoc/multiline 문자열 리터럴에 파괴 명령이 "데이터"로 들어간 경우
 #   개행 분리가 이를 별도 세그먼트로 오차단할 수 있음(저빈도) — 오차단 의심되면 규칙을 좁혀라. $()·eval·
 #   base64 등으로 인코딩된 명령은 여전히 미탐지(heuristic 한계, 완전 파싱기가 아님).
@@ -169,8 +171,51 @@ def check_one(seg, depth):
             soft_block("git clean -f — 미추적 파일 소실(로컬·되돌리기 가능). strict면 차단, KSI_HOOKS=warn/off면 경고만")
 
     if prog in ("psql", "mysql", "mariadb") or (prog == "supabase" and "db" in args):
-        if re.search(r"(?i)\bdrop\s+(database|schema)\b", seg):
+        DROP_RE = re.compile(r"(?i)\bdrop\s+(database|schema)\b")
+        if DROP_RE.search(seg):
             block("인터랙티브 DROP DATABASE/SCHEMA — 마이그레이션 경로로만(대표자 결정 레인)")
+        # 명령줄 문자열만 보면 `psql -f drop.sql`·`psql < drop.sql`·heredoc의 DROP은 안 보인다 —
+        # 실행될 SQL 파일 내용에도 같은 정규식을 적용한다. 읽지 못하는 파일은 차단 대신 사각을 가시화(은폐 금지).
+        # heredoc은 cmd 전역이 아니라 *실제 heredoc body*만 검사한다 — 전역 매칭은 무관 세그먼트
+        # (echo "DROP DATABASE는 위험" 같은 문서 작업)가 psql heredoc과 한 호출에 있을 때 정상 작업을 과차단한다.
+        if "<<" in seg:
+            for hm in re.finditer(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1", cmd):
+                delim = re.escape(hm.group(2))
+                body_m = re.search(r"<<-?\s*['\"]?" + delim + r"['\"]?[^\n]*\n(.*?)\n[ \t]*" + delim + r"\b", cmd, re.S)
+                if body_m and DROP_RE.search(body_m.group(1)):
+                    block("psql/mysql heredoc 경유 DROP DATABASE/SCHEMA — 마이그레이션 경로로만(대표자 결정 레인)")
+        sql_files = []
+        for j, a in enumerate(args):
+            a2 = a.strip("'\"")
+            if prog == "psql" and a2 in ("-f", "--file") and j + 1 < len(args):
+                sql_files.append(args[j + 1])
+            elif prog == "psql" and a2.startswith("-f") and len(a2) > 2 and not a2.startswith("--"):
+                sql_files.append(a2[2:])
+            elif a2.startswith("--file="):
+                sql_files.append(a2.split("=", 1)[1])
+        # `<` 리다이렉트 파일은 quote-aware 토큰(qtoks)에서 뽑는다 — raw 정규식은 인용부호를 몰라
+        # `psql -c "SELECT ... WHERE a < 5"`의 SQL 비교연산자를 파일로 오인해 반복 노이즈를 낸다.
+        if qtoks:
+            for j, t in enumerate(qtoks):
+                if t == "<" and j + 1 < len(qtoks):
+                    sql_files.append(qtoks[j + 1])
+        else:
+            m = re.search(r"(?<!<)<(?!<)\s*([^\s;|&<>]+)", seg)
+            if m:
+                sql_files.append(m.group(1))
+        for f in sql_files:
+            exp = f.strip("'\"").replace("${HOME}", HOME).replace("$HOME", HOME)
+            if exp.startswith("~"):
+                exp = HOME + exp[1:]
+            try:
+                if os.path.isfile(exp) and os.path.getsize(exp) <= 5 * 1024 * 1024:
+                    with open(exp, errors="ignore") as fh:
+                        if DROP_RE.search(fh.read()):
+                            block(f"SQL 파일 경유 DROP DATABASE/SCHEMA: {f} — 마이그레이션 경로로만(대표자 결정 레인)")
+                else:
+                    print(f"pre-destructive-guard: SQL 입력 {f} 은(는) 검사하지 못함(부재/과대) — DROP 여부 직접 확인", file=sys.stderr)
+            except Exception:
+                print(f"pre-destructive-guard: SQL 입력 {f} 읽기 실패 — 가드 미검사", file=sys.stderr)
 
 check_segments(cmd)
 sys.exit(0)

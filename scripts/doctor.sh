@@ -57,6 +57,14 @@ else
     "~/.claude/workflows/ 미배치 — 감사 스킬이 인터랙티브 fallback으로 강등됨" \
     "플러그인 머신: bash scripts/sync-machine.sh --plugin  (workflows/*.js·ksi-goals.py를 ~/.claude로 배치)"
 fi
+if [ -f "$HOME/.claude/scripts/load-guard.sh" ] && [ -f "$HOME/.claude/scripts/capture.mjs" ] \
+   && [ -f "$HOME/.claude/templates/visual-qa.yml" ]; then
+  printf '  ✓ %-9s %s\n' scripts "~/.claude/{scripts,templates} 배치됨 (load-guard·capture·visual-qa — ui-audit §2 캡처 라우팅)"
+else
+  printf '  ⚠ %-9s %s\n      → %s\n' scripts \
+    "load-guard.sh/capture.mjs/visual-qa.yml 미배치 — ui-audit §2 preflight·캡처 라우팅 미동작(구버전 배치 상태)" \
+    "bash scripts/sync-machine.sh --plugin  (스크립트·워크플로·템플릿 재배치)"
+fi
 echo
 echo "-- 프로젝트별 (하네스 전역 아님 — 각 프로젝트 CLAUDE.md 완료 게이트 소관)"
 echo "  · mypy/pytest(Python) · tsc/typecheck(TS) — 프로젝트 가상환경/devDependencies로."

@@ -51,10 +51,13 @@ case "$MODE" in
     else
       echo "   ⚠ workflows 복사 실패 — templates/workflows/ 확인"
     fi
-    for s in ksi-goals.py harness-selfcheck.py; do
+    for s in ksi-goals.py harness-selfcheck.py load-guard.sh capture.mjs; do
       cp -f "plugins/ksi-harness/scripts/$s" "$HOME/.claude/scripts/" 2>/dev/null \
         && echo "   ✓ $s → ~/.claude/scripts/" || echo "   ⚠ $s 복사 실패"
     done
+    mkdir -p "$HOME/.claude/templates"
+    cp -f templates/visual-qa.yml "$HOME/.claude/templates/" 2>/dev/null \
+      && echo "   ✓ visual-qa.yml → ~/.claude/templates/" || echo "   ⚠ visual-qa.yml 복사 실패"
     echo "== 3) 훅 행동 회귀 (dist 스크립트, 이 머신의 bash/python3 이식성 검증) =="
     bash scripts/test-hooks.sh || exit 1
     ;;

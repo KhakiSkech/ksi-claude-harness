@@ -230,7 +230,7 @@ scripts/test-hooks.sh               # "✅ 전체 통과"가 나와야 함
 
 `~/.claude/workflows/`(개인) 또는 프로젝트 `.claude/workflows/`에 복사해 씁니다. args 상세는 각 파일 상단 주석.
 
-> ⚠️ **플러그인 설치 머신은 이 워크플로가 자동으로 따라오지 않습니다** — Claude Code 플러그인 번들은 `skills/agents/hooks`만 자동설치하고 saved workflow(.js)·`ksi-goals.py`는 나르지 않습니다(공식 미지원). 감사 스킬(`/codebase-audit`·`/ui-audit`·`/goals`)이 이 워크플로를 `~/.claude/workflows/` 경로로 호출하므로, **플러그인 설치 후 `bash scripts/sync-machine.sh --plugin`을 한 번 실행**해 `templates/workflows/*.js`와 `ksi-goals.py`를 `~/.claude/`에 배치하세요. 미배치 시 감사 스킬은 인터랙티브 fallback(§1–6 수동 진행)으로 동작합니다. 배치 여부는 `bash scripts/doctor.sh`가 점검합니다.
+> ⚠️ **플러그인 설치 머신은 이 워크플로가 자동으로 따라오지 않습니다** — Claude Code 플러그인 번들은 `skills/agents/hooks`만 자동설치하고 saved workflow(.js)·`ksi-goals.py`는 나르지 않습니다(공식 미지원). 감사 스킬(`/codebase-audit`·`/ui-audit`·`/goals`)이 이 워크플로를 `~/.claude/workflows/` 경로로 호출하므로, **플러그인 설치 후 `bash scripts/sync-machine.sh --plugin`을 한 번 실행**해 `templates/workflows/*.js`·스크립트(`ksi-goals.py`·`load-guard.sh`·`capture.mjs`)·`visual-qa.yml`을 `~/.claude/`에 배치하세요. 미배치 시 감사 스킬은 인터랙티브 fallback(§1–6 수동 진행)으로 동작합니다. 배치 여부는 `bash scripts/doctor.sh`가 점검합니다.
 
 | 워크플로 | 역할 |
 |---|---|

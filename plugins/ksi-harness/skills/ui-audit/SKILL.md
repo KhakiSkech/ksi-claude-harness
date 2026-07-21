@@ -25,7 +25,11 @@ when_to_use: UI 기능을 "완료"하기 직전, 사용자가 화면 깨짐을 �
    - **콜드스타트 시나리오:** 빈 조직 + **각 역할로 로그인한 첫 화면**. 픽셀 한 장이 아니라 **동선**을 캡처 — "핵심 산출물(리포트·결과)까지 nav에서 몇 클릭에 도달하나, 못 찾나, 클릭하면 리다이렉트되는 죽은 메뉴는 없나".
    - **측정 기준(design-side spec)을 먼저 확보:** §0의 UX목표 5축(=CLAUDE.md SSOT). 없으면 PRD/`docs/`에서 추출하거나 사용자에게 1줄 확인. **시각 감사는 '안 깨졌나'가 아니라 '이 목표 대비 gap이 있나'를 본다** — 기준 없는 감사는 '잘 구성됐나'만 통과시킨다.
 
-2. **캡처** — `/run` 또는 `/verify`로 앱 기동 → Playwright(또는 playwright-mcp)로 페이지×뷰포트 스크린샷을 파일로 저장. 기동 불가면 사용자에게 실행 방법을 1줄로 묻는다.
+2. **캡처 — 실행 위치 라우팅** (캡처만 CPU-heavy — 판독 fan-out(§3)은 API 에이전트라 로컬 CPU 무관. 경합 박스에선 "더 병렬"이 아니라 "밖으로 빼거나(CI) 줄 세우기(락)"):
+   - **preflight(필수):** `bash ~/.claude/scripts/load-guard.sh check` — RED(exit 2)면 CI 경로 우선. 로컬이 불가피하면(CI 미채택 레포 등) **막지 말고 저강도로 진행**(capture.mjs가 자동 감속: self-nice 10·동시성 1)하되 지연·부분실패 가능성을 사용자에게 1줄 보고. YELLOW는 경고 후 진행. (임계값·락 대기 노브 SSOT=스크립트 헤더)
+   - **local(기본):** `/run`·`/verify`로 앱 기동 → 일괄 캡처는 `node ~/.claude/scripts/capture.mjs --pages <pages>`(픽셀-중립 효율 러너: reduced-motion·애니메이션 고정, 고신뢰 트래커만 차단, 부하 적응 동시성, self-nice. **폰트/이미지 차단 등 픽셀을 바꾸는 최적화는 금지** — 감사 입력 오염) · 동선·인터랙션 캡처만 playwright-mcp. 캡처 명령은 `load-guard.sh run -- <cmd>`로 감싼다(flock 직렬화 — 동시 세션의 Chromium 중첩 기동 방지. **병렬은 캡처가 아니라 판독·verify에서**). 기동 불가면 사용자에게 실행 방법을 1줄로 묻는다.
+   - **CI(load RED·멀티프로젝트 동시 감사·정례 회귀):** `~/.claude/templates/visual-qa.yml`을 repo `.github/workflows/`에, `~/.claude/scripts/capture.mjs`를 repo `scripts/visual-qa-capture.mjs`로 복사 채택(local과 같은 러너로 수렴 — repo 반영·push=대표자 결정 레인) → 러너가 캡처 후 아티팩트 업로드 → `gh run download -n visual-qa-shots`로 받아 **§3부터는 평소처럼 로컬 하네스가 수행**(adversarial verify가 같은 픽셀을 다시 보는 루프 무손상). 러너=프로젝트별 독립·병렬 by design — **멀티프로젝트 병렬 시각 감사의 canonical 경로.**
+   - Agent `isolation:"remote"`는 이 경로의 기본이 아니다 — 환경에 따라 remote 스폰이 같은 호스트로 **조용히 강등**될 수 있다(가용성 gated — 첫 응답 "ok"만으론 가용 오판). 판별 probe(hostname·loadavg·파일시스템 비교)로 진짜 격리가 실측 확인된 환경에서만 고려하고, 그 전까지 원격 캡처=CI.
 
 3. **시각 감사 (fan-out)** — 페이지(또는 뷰포트)별로 에이전트를 띄워 **스크린샷을 Read로 보게** 하고 결함을 분류 보고:
    - 오버플로 / 클리핑 / 가로 스크롤

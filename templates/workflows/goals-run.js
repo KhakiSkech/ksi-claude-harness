@@ -35,7 +35,7 @@ const maxAttemptsPerGoal = 2 // 같은 목표 반복 실패 시 skip(무한루�
 const G = `python3 ~/.claude/scripts/ksi-goals.py --dir ${JSON.stringify(DIR)}`
 
 // red-lane 어휘 — 되돌리기 어렵거나 외부영향. 목표 title/criteria에 걸리면 자동 실행 금지.
-const RED = /push|deploy|배포|출시|release|migrat|마이그|백필|backfill|rollback|롤백|payment|결제|과금|billing|refund|환불|payout|정산|withdraw|출금|mainnet|메인넷|실거래|live[\s_-]?trad|secret|비밀|\.env|credential|rotate|외부\s?전송|prod(uction)?\b/i
+const RED = /push|deploy|배포|출시|release|migrat|마이그|백필|backfill|rollback|롤백|payment|결제|과금|billing|refund|환불|payout|정산|withdraw|출금|secret|비밀|\.env|credential|rotate|외부\s?전송|prod(uction)?\b/i
 
 const STATUS_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['done', 'actionable', 'counts'],

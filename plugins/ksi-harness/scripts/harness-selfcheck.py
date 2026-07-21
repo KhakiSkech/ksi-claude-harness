@@ -32,8 +32,8 @@ _PLUG = os.environ.get("CLAUDE_PLUGIN_ROOT", "")
 HOOKS_DIR = (os.path.join(_PLUG, "scripts") if _PLUG and os.path.isdir(os.path.join(_PLUG, "scripts"))
              else os.path.join(HOME, ".claude", "hooks"))
 
-# $-가중 단가는 memory harness-design-principles의 📌 SSOT가 근거 — 여기 값은 롤업 편의용 표기이고
-# 세대교체 시 그 SSOT를 먼저 고친다(2026-07 기준, cache_read=0.1x·cache_write=1.25x는 prompt-caching 문서).
+# $-가중 단가는 각 모델의 공식 pricing이 근거 — 여기 값은 롤업 편의용 표기이고 세대교체 시 갱신한다
+# (cache_read=0.1x·cache_write=1.25x는 prompt-caching 문서 기준).
 PRICE = {  # (input_per_mtok, output_per_mtok)
     "opus": (5.0, 25.0),
     "sonnet": (3.0, 15.0),   # intro $2/$10은 2026-08-31 만료 — sticker로 계산(보수적)
